@@ -106,18 +106,30 @@ jobs:
       - name: Regenerate the verification documents and diff
         run: |
           python tools/make_verification.py
-          # Keep only added/removed content lines, then drop the one line that is a
-          # property of the runner rather than of the answer key: wall-clock timings.
-          git diff --ignore-all-space -- verification/ \
-            | grep -E '^[-+]' \
-            | grep -Ev '^(---|\+\+\+) ' \
-            | grep -Ev '^[-+]- runtimes:' > verification.diff || true
+          # These documents are machine-generated, so a PR that moves a number has to
+          # carry the regenerated file.  Two things in them are properties of the runner
+          # rather than of the answer key and are normalised away before comparing:
+          # wall-clock timings, and the version the disassembler library self-reports
+          # (capstone's 5.0.9 wheel still prints `capstone/5.0.7`).
+          : > verification.diff
+          for f in openmv2 openmv3; do
+            for side in HEAD worktree; do
+              if [ "$side" = HEAD ]; then
+                git show "HEAD:verification/$f.md"
+              else
+                cat "verification/$f.md"
+              fi | sed -E 's/^- runtimes:.*/- runtimes: (runner)/;
+                          s/capstone\/[0-9][0-9a-z.+-]*/capstone\/VERSION/g' \
+                 | tr -s ' \t' ' ' > "/tmp/$f.$side"
+            done
+            diff -u "/tmp/$f.HEAD" "/tmp/$f.worktree" >> verification.diff || true
+          done
           if [ -s verification.diff ]; then
             echo "::error::verification/*.md changed -- commit the regenerated documents (see CONTRIBUTING.md)"
             head -80 verification.diff
             exit 1
           fi
-          echo "verification documents reproduce byte-for-byte (modulo runtimes)"
+          echo "verification documents reproduce (modulo timings and the capstone version string)"
 
       - uses: actions/upload-artifact@v4
         if: failure()

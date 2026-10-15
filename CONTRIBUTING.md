@@ -41,6 +41,11 @@ presented as another's, and do not merge two engines' findings into a single row
 distinction is the reason a reader can weigh a `peripheral.access` against a
 `peripheral.usage`.
 
+The version in a `capstone/...` label is the *distribution* version (`importlib.metadata`),
+not the library's `__version__` — the two disagree in the wild, the 5.0.9 wheel still
+self-reports 5.0.7 — because a reader who wants to re-run the claim needs the number their
+package manager recognises.  Pin the *shape* of an engine label in tests, never its number.
+
 **3. A number quoted in prose must be a number the tool prints today.**  `README.md` and
 `docs/case-*.md` paste real report rows, and a heuristic fix silently makes one of them
 stale.  `python tools/check_doc_quotes.py` re-scans every fetched sample and checks each

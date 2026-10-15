@@ -121,6 +121,20 @@ def test_whitespace_flattening_survives_a_rewrap():
                    "registers seen: MODER(24)")
 
 
+def test_a_different_library_version_is_not_a_stale_quote():
+    """`capstone/5.0.9` over the same bytes is a property of the runner, not of the claim.
+
+    The distribution version and capstone's own `__version__` already disagree (the 5.0.9
+    wheel prints `capstone/5.0.7`), so comparing engine labels literally would make the
+    docs gate fail on a `pip install --upgrade` instead of on a wrong number.  The engine
+    *name* still has to match.
+    """
+    frag = {"kind": "peripheral.access", "subject": "DCMI", "engine": "capstone/5.0.7"}
+    assert chk.subset(frag, {**REAL, "engine": "capstone/5.0.9"})
+    assert not chk.subset({"kind": "peripheral.access", "subject": "DCMI",
+                           "engine": "carve/1"}, REAL)
+
+
 def test_a_json_fence_that_does_not_parse_is_still_classified_as_json(tmp_path):
     """The bug worth catching is a ```json block that is not valid JSON.
 

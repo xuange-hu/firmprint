@@ -22,20 +22,20 @@ constants and Thumb-2 instructions and derives blocks from addresses.
 
 | oracle module | linked symbols | firmprint block(s) | status | engine(s) |
 |---|---|---|---|---|
-| I2C | 32 | I2C1, I2C2, I2C3 | OK | capstone/5.0.7, carve/1 |
-| TIM | 31 | TIM1, TIM2, TIM3, TIM4, TIM5, TIM6, TIM7, TIM8, TIM9, TIM10, TIM11, TIM12, TIM13, TIM14 | OK | capstone/5.0.7, carve/1 |
-| SPI | 24 | SPI1, SPI2, SPI3, SPI4, SPI5, SPI6 | OK | capstone/5.0.7, carve/1 |
-| DCMI | 14 | DCMI | OK | capstone/5.0.7, carve/1 |
-| DMA2D | 10 | DMA2D | OK | capstone/5.0.7, carve/1 |
-| DMA | 8 | DMA1, DMA2 | OK | capstone/5.0.7, carve/1 |
-| RCC | 6 | RCC | OK | capstone/5.0.7, carve/1 |
-| ADC | 5 | ADC1, ADC2, ADC3 | OK | capstone/5.0.7, carve/1 |
-| CAN | 5 | CAN1, CAN2 | OK | capstone/5.0.7, carve/1 |
-| RTC | 5 | RTC | OK | capstone/5.0.7, carve/1 |
-| GPIO | 4 | GPIOA, GPIOB, GPIOC, GPIOD, GPIOE, GPIOF, GPIOG, GPIOH, GPIOI, GPIOJ, GPIOK | OK | capstone/5.0.7, carve/1 |
-| PWR | 3 | PWR | OK | capstone/5.0.7, carve/1 |
-| FLASH | 3 | FLASH_R | OK | capstone/5.0.7, carve/1 |
-| UART | 2 | USART1, USART2, USART3, UART4, UART5, USART6 | OK | capstone/5.0.7, carve/1 |
+| I2C | 32 | I2C1, I2C2, I2C3 | OK | capstone/5.0.9, carve/1 |
+| TIM | 31 | TIM1, TIM2, TIM3, TIM4, TIM5, TIM6, TIM7, TIM8, TIM9, TIM10, TIM11, TIM12, TIM13, TIM14 | OK | capstone/5.0.9, carve/1 |
+| SPI | 24 | SPI1, SPI2, SPI3, SPI4, SPI5, SPI6 | OK | capstone/5.0.9, carve/1 |
+| DCMI | 14 | DCMI | OK | capstone/5.0.9, carve/1 |
+| DMA2D | 10 | DMA2D | OK | capstone/5.0.9, carve/1 |
+| DMA | 8 | DMA1, DMA2 | OK | capstone/5.0.9, carve/1 |
+| RCC | 6 | RCC | OK | capstone/5.0.9, carve/1 |
+| ADC | 5 | ADC1, ADC2, ADC3 | OK | capstone/5.0.9, carve/1 |
+| CAN | 5 | CAN1, CAN2 | OK | capstone/5.0.9, carve/1 |
+| RTC | 5 | RTC | OK | capstone/5.0.9, carve/1 |
+| GPIO | 4 | GPIOA, GPIOB, GPIOC, GPIOD, GPIOE, GPIOF, GPIOG, GPIOH, GPIOI, GPIOJ, GPIOK | OK | capstone/5.0.9, carve/1 |
+| PWR | 3 | PWR | OK | capstone/5.0.9, carve/1 |
+| FLASH | 3 | FLASH_R | OK | capstone/5.0.9, carve/1 |
+| UART | 2 | USART1, USART2, USART3, UART4, UART5, USART6 | OK | capstone/5.0.9, carve/1 |
 
 Peripheral blocks firmprint reported that the driver oracle has no name for (28): ADC123_COMMON, CRC, DAC, DBGMCU, DMA1_Stream0, DMA1_Stream2, DMA1_Stream3, DMA1_Stream4, DMA1_Stream5, DMA1_Stream6, DMA1_Stream7, DMA2_Stream1, DMA2_Stream3, DMA2_Stream5, DMA2_Stream6, ETH, EXTI, FMC_Bank1_R, I2S2ext, I2S3ext, IWDG, RNG, SAI1, SDIO, SYSCFG, UART7, UART8, WWDG
 
@@ -91,7 +91,7 @@ one of them.
   from the capstone engine and quote instruction bytes.
 - register names resolve only where CMSIS gives the block a struct; an offset inside a
   struct hole reports as the block base rather than an invented register.
-- runtimes: ELF 0.85s, raw 0.73s, merged 0.93s (3.12.10 / windows).
+- runtimes: ELF 0.93s, raw 0.76s, merged 0.95s (3.12.10 / windows).
 
 ## Reproduce
 

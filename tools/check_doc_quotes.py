@@ -58,6 +58,20 @@ def flat(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+# The engine label carries whatever version the disassembler library self-reports, and that
+# is a property of the machine reading the docs, not of the firmware or of the claim: the
+# wheel that ships capstone 5.0.9 prints `capstone/5.0.9` over the same bytes that made
+# these quotes.  Normalising the version token is the difference between a checker that
+# catches a stale count and one that fails on every runner update.  Nothing else about an
+# engine label is allowed to differ.
+ENGINE_VER = re.compile(r"capstone/\d[\w.+-]*")
+
+
+def norm(text: str) -> str:
+    """Whitespace-collapsed, with the runner-dependent library version folded out."""
+    return flat(ENGINE_VER.sub("capstone/", text))
+
+
 def blocks(text: str) -> list[tuple[str, str]]:
     """(fence language, body) for every fenced block; the language is on the fence line."""
     return [(lang.strip(), body) for lang, body in re.findall(r"```([^\n]*)\n(.*?)```", text, re.S)]
@@ -68,7 +82,7 @@ def subset(frag: dict, real: dict) -> bool:
     for key, want in frag.items():
         got = real.get(key)
         if isinstance(want, str):
-            if not isinstance(got, str) or want not in got:
+            if not isinstance(got, str) or norm(want) not in norm(got):
                 return False
         elif isinstance(want, dict):
             if not isinstance(got, dict) or not subset(want, got):
@@ -143,19 +157,19 @@ def main() -> int:
         return 0
 
     findings, lines = run_all(images)
-    live_text = flat("\n".join(lines))
+    live_text = norm("\n".join(lines))
     # (kind, subject, conf@2dp) -> the summaries the tool printed for that triple
     live_pairs: dict[tuple[str, str, str], list[str]] = {}
     for line in lines:
         s = line.strip()
         if m := FINDING.match(s):
-            live_pairs.setdefault(m.groups()[:3], []).append(s[m.end():].strip())
+            live_pairs.setdefault(m.groups()[:3], []).append(norm(s[m.end():].strip()))
     # and the same triples from the JSON, where nothing is truncated at the column:
     # a doc may quote further into a summary than the text table ever printed
     live_summaries: dict[tuple[str, str, str], list[str]] = {}
     for f in findings:
         key = (f["kind"], str(f["subject"])[:19], f"{f['confidence']:.2f}")
-        live_summaries.setdefault(key, []).append(f["summary"])
+        live_summaries.setdefault(key, []).append(norm(f["summary"]))
     problems: list[str] = []
     checked = 0
 
@@ -199,11 +213,11 @@ def main() -> int:
                         if len(nxt) - len(nxt.lstrip()) < 4 or FINDING.match(nxt.strip()):
                             break
                         tail.append(nxt.strip())
-                    quoted_tail = flat(" ".join(tail)).split("…")[0].split(" ...")[0].strip()
+                    quoted_tail = norm(" ".join(tail)).split("…")[0].split(" ...")[0].strip()
                     if quoted_tail and not any(
-                            quoted_tail in flat(t) or flat(t).startswith(quoted_tail)
+                            quoted_tail in t or t.startswith(quoted_tail)
                             for t in live_pairs[triple]) and not any(
-                            quoted_tail in flat(sm) for sm in live_summaries.get(triple, [])):
+                            quoted_tail in sm for sm in live_summaries.get(triple, [])):
                         problems.append(f"{rel}: {m.group(1)}/{m.group(2)} at "
                                         f"{m.group(3)} is real, but no run prints the "
                                         f"summary quoted here: {quoted_tail[:70]}")
@@ -214,7 +228,7 @@ def main() -> int:
                                     f"but is not column-padded, so this checker would skip "
                                     f"it; re-paste it the way the CLI prints it")
                 elif HEADER.match(s):
-                    head = flat(s.split("…")[0].split(" ...")[0].rstrip(". "))
+                    head = norm(s.split("…")[0].split(" ...")[0].rstrip(". "))
                     checked += 1
                     if a.list:
                         print(f"  quote  {rel}: {head[:70]}")

@@ -63,6 +63,18 @@ def sweep(insns, soc, image, stats=None):
 
 # ------------------------------------------------------------------ the tracking rules
 
+def test_the_engine_label_names_the_installed_distribution_not_the_lagging_module():
+    """The label is provenance, so it must be a number `pip show` agrees with.
+
+    capstone ships `__version__` = "5.0.7" inside the 5.0.9 wheel; a finding that cites
+    "the disassembler said so" while naming a version nobody installed is the kind of
+    loose provenance this project exists to avoid.
+    """
+    from importlib.metadata import version
+
+    assert decode.engine_label() == f"capstone/{version('capstone')}"
+
+
 def test_a_movw_movt_pair_then_a_store_becomes_a_write_to_the_named_register(soc, image):
     a, i, _ = sweep([insn(TEXT_BASE, "movw", f"r3, #0x{USART1 & 0xFFFF:04X}"),
                      insn(TEXT_BASE + 2, "movt", f"r3, #0x{USART1 >> 16:04X}"),

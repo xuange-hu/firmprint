@@ -27,7 +27,7 @@ container   raw / arm  1 segment(s)  entry -
 match       stm32f427xx (f4, cortex-m4)  conf 0.66  best match on the RAM map, not on device constants
             db STMicroelectronics/cmsis-device-f4@eaffa1727f63
 candidates  stm32f427xx=89 constants/81 blocks, stm32f765xx=89 constants/81 blocks, stm32h743xx=45 constants/39 blocks
-engines     container=container/1, vectors=vectors/1, carve=carve/1, decode=capstone/5.0.7
+engines     container=container/1, vectors=vectors/1, carve=carve/1, decode=capstone/5.0.9
 decoded     200,010 instructions, 0 function(s), coverage 66%
 contract    0 violation(s)
 
@@ -115,7 +115,7 @@ evidence records, and a list of `unknowns`.  This is the real report for
   "kind": "peripheral.access",
   "subject": "CAN1",
   "confidence": 0.86,
-  "engine": "capstone/5.0.7",
+  "engine": "capstone/5.0.9",
   "rule": "peripheral.access.tracked-base-register",
   "evidence_total": 9,
   "evidence": [{

@@ -27,6 +27,30 @@ except Exception:                        # noqa: BLE001 - missing/broken lib is 
 
 DEFAULT_CODE_BUDGET = 0x8_0000           # 512 KB of decoded code by default
 
+
+def engine_label() -> str:
+    """`capstone/<version>` -- the version of the library that actually decoded the bytes.
+
+    An engine label is provenance, so it has to be the number a reviewer can re-create:
+    capstone's own `__version__` lags its distribution (the 5.0.9 wheel still prints
+    "5.0.7"), which would put a version on every finding that `pip show` denies installing.
+    Distribution metadata first, module string when the package has none (a vendored or
+    in-tree build), and never a guess.
+    """
+    if CAPSTONE is None:
+        return ""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            return f"capstone/{version('capstone')}"
+        except PackageNotFoundError:
+            pass
+    except Exception:                    # noqa: BLE001 - metadata is a nicety, not a dep
+        pass
+    return f"capstone/{CAPSTONE.__version__}"
+
+
 #: the address range ARM reserves for memories and peripherals, below the
 #: private peripheral bus (0xE000_0000+, whose NVIC/SysTick/SCB registers live in
 #: the *core* header rather than the device header, so a device database cannot
@@ -121,7 +145,7 @@ def decode_code(image: Image, soc: Soc, budget: int = DEFAULT_CODE_BUDGET,
 
     code_segs = [s for s in image.segments if s.kind == "text"] or \
         [s for s in image.segments if s.name and "text" in (s.name or "")]
-    stats = {"engine": "capstone/" + CAPSTONE.__version__, "bytes_decoded": 0,
+    stats = {"engine": engine_label(), "bytes_decoded": 0,
              "instructions": 0, "segments": len(code_segs), "coverage": 0.0,
              "functions": 0, "resyncs": 0, "memory_hits": 0}
     total = sum(len(s.data) for s in code_segs)

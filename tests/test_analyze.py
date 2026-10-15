@@ -14,6 +14,7 @@ import pytest
 from conftest import cortex_m_image
 
 from firmprint.analyze import SCHEMA, analyze, to_markdown
+from firmprint.decode import available as capstone_available
 from firmprint.evidence import STRICT_CONFIDENCE
 from firmprint.verify import compare, symbol_oracle
 
@@ -169,8 +170,15 @@ def test_the_driver_oracle_is_fully_recalled_and_never_given_to_the_analysis(rep
     assert res["confirmed"] == res["oracle_modules"] == 14
     assert res["recall_over_drivers"] == 1.0
     assert res["detected_peripherals"] >= 60
-    # the oracle is a *separate* observation: peripheral claims come from addresses
-    assert {"capstone/5.0.7+carve/1", "carve/1"} <= set(res["peripherals_by_engine"])
+    # the oracle is a *separate* observation: peripheral claims come from addresses.
+    # The engine labels are matched by shape, not by literal version -- `capstone/x` is
+    # whatever the installed disassembler self-reports, and pinning it here would make a
+    # `pip install --upgrade` look like a regression in the answer key.
+    engines = set(res["peripherals_by_engine"])
+    assert "carve/1" in engines, engines
+    if capstone_available():
+        assert any(e.startswith("capstone/") and e.endswith("+carve/1")
+                   for e in engines), engines
 
 
 def test_blocks_the_oracle_cannot_name_are_reported_as_unconfirmed_not_wrong(report):
