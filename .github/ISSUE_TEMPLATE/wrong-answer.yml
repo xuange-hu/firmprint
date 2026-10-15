@@ -1,0 +1,68 @@
+name: Wrong answer on a real image
+description: The report says something about firmware, and the firmware disagrees
+labels: [triage]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        This project's only product is a *checkable* claim, so a bug report needs the
+        claim and the bytes that produced it. A report without an anchor will be closed
+        as unactionable — not to be rude, but because "firmprint is wrong" cannot be
+        reproduced, and "0x080465AC decoded as `ldr r2, [r3]`, the base came from a
+        MOVW of 0x50050000, DCMI was named" can be.
+
+        **Do not attach the firmware image.** Paste the report output instead.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What the report claimed
+      description: The finding row, verbatim, including its `engine` and `rule` labels.
+      placeholder: |
+        peripheral.access  DCMI  0.86  DCMI: 6 decoded load/store(s) through a tracked base register; ...
+    validations:
+      required: true
+  - type: textarea
+    id: reality
+    attributes:
+      label: What the image actually contains
+      description: >
+        The offset, the virtual address, and the raw bytes at that offset — plus why you
+        know the claim is wrong (symbol table, disassembly, datasheet, your own source).
+        `python -m firmprint scan IMG --format json` prints all three per evidence item.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Full report header
+      description: The `file / container / match / candidates / engines / contract` block, plus the `note` lines printed under it.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: socdb
+    attributes:
+      label: SoC databases in play
+      description: Output of `firmprint socdb list` — the header sha256 per line is what makes the claim traceable.
+      placeholder: stm32f427xx  f4  cortex-m4  117 blocks  30 structs  eaffa1727f63
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which engine tier produced the claim
+      description: A `carve/1` (stdlib) and a `capstone/x` (decoded) bug are different bugs with different fixes.
+      options:
+        - carve / stdlib tier (peripheral.usage, memory.reference, soc.candidate)
+        - capstone tier (peripheral.access, peripheral.materialised)
+        - vectors / container
+        - not sure
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduce
+      description: The exact command, plus OS, Python version and capstone version (`firmprint --version` prints the schema; the `engines` line of the report prints the engine versions). If you cannot share the image, say so and attach `tools/make_synthetic.py` output that shows the same defect.
+      render: shell
+    validations:
+      required: true

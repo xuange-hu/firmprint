@@ -97,6 +97,12 @@ jobs:
             echo "ok: $f"
           done
 
+      - name: Quoted report lines in the prose must match live output
+        # README.md and docs/case-*.md paste real rows.  Re-scanning every fetched
+        # sample here is what stops a heuristic fix from leaving a stale number in
+        # the documentation -- the one failure mode this project cannot afford.
+        run: python tools/check_doc_quotes.py
+
       - name: Regenerate the verification documents and diff
         run: |
           python tools/make_verification.py

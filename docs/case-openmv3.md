@@ -33,12 +33,16 @@ three produced tables, one won.
 ## 2. A stack pointer that looked like a bug
 
 ```json
-{"kind": "cortex-m.vector_table", "subject": "table@0x08020000", "confidence": 0.865,
- "summary": "vector table at 0x08020000: 115 live handlers within 150 scanned slots
-             (10 zeroed, 25 non-code), initial MSP 0x00004000, reset handler 0x080201F9;
-             78 distinct targets, unused slots are aliased to a default handler",
- "metrics": {"msp": "0x00004000", "reset": "0x080201F9", "n_live": 115, "n_scanned": 150,
-             "unique_handlers": 78, "monotone_ratio": 0.544, "slot_density": 0.767}}
+{
+ "kind": "cortex-m.vector_table",
+ "subject": "table@0x08020000",
+ "confidence": 0.865,
+ "summary": "vector table at 0x08020000: 115 live handlers within 150 scanned slots (10 zeroed, 25 non-code), initial MSP 0x00004000, reset handler 0x080201F9; 78 distinct targets, unused slots are aliased to a default handler; the scan stopped after 24 unused slots, so the live count is a lower bound",
+ "metrics": {
+  "msp": "0x00004000", "reset": "0x080201F9", "n_live": 115, "n_scanned": 150,
+  "unique_handlers": 78, "monotone_ratio": 0.544, "slot_density": 0.767
+ }
+}
 ```
 
 `0x00004000` is not in any RAM region this tool knew about.  The first version of the
@@ -75,26 +79,36 @@ def itcm_base(self) -> int | None:
 larger of the two and `0x0001_0000` stops there.  On a Cortex-M4 the low window is the
 *flash* alias: the same `0x00004000` there means a bogus stack pointer, so accepting it
 would let a broken value vouch for a part.  `tests/test_socdb.py` pins both halves — F7
-accepts, F4 refuses, and the window closes at 64 KB.  Now the F7 candidate reads:
+accepts, F4 refuses, and the window closes at 64 KB.  The top candidate in the JSON report,
+summary verbatim:
 
+```json
+{
+  "kind": "soc.candidate",
+  "subject": "stm32f765xx",
+  "confidence": 0.757,
+  "summary": "best match: stm32f765xx: 97 distinct device constants in this image land in its peripheral map (88 blocks), 4 of them in no other installed map, and 1 that another map explains are missing from it; load region inside flash base 0x08000000; MSP inside RAM at 0x00000000 (ITCM)"
+}
 ```
-soc.candidate  stm32f765xx  0.757  best match: stm32f765xx: 97 distinct device constants
-                                   in this image land in its peripheral map (88 blocks),
-                                   4 of them in no other installed map, and it cannot
-                                   explain the 1 constants another map does explain;
-                                   load region inside flash base 0x08000000;
-                                   MSP inside RAM at 0x00000000 (ITCM)
-```
+
+The plain-text table prints the same finding at two decimals (`0.76`) and truncates the
+summary at the column; the JSON is the artifact to quote.
 
 ## 3. Four constants that separate the families
 
-This is the part the F4 sample could not do.  Ranked candidates, from the same three maps:
+This is the part the F4 sample could not do.  The header line the scan prints:
 
 ```
-candidates  stm32f765xx=97 constants/88 blocks   (exclusive 4, blind 1, conf 0.757)
-            stm32f427xx=90 constants/81 blocks   (exclusive 0, blind 8, conf 0.58)
-            stm32h743xx=49 constants/42 blocks   (exclusive 1, blind 49, conf 0.433)
+candidates  stm32f765xx=97 constants/88 blocks, stm32f427xx=90 constants/81 blocks, stm32h743xx=49 constants/42 blocks
 ```
+
+and the three `soc.candidate` findings behind it, straight from the JSON:
+
+| map | conf | constants explained | blocks | `exclusive_constants` | `blind_constants` |
+|---|---|---|---|---|---|
+| stm32f765xx | 0.757 | 97 | 88 | **4** | 1 |
+| stm32f427xx | 0.58 | 90 | 81 | 0 | 8 |
+| stm32h743xx | 0.433 | 49 | 42 | 1 | 49 |
 
 The F4 map is *blind* to eight constants this image contains, and the F7 map explains all
 eight.  Four of them belong to no other installed map:

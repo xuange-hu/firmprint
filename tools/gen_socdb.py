@@ -327,7 +327,11 @@ def main() -> int:
     db = build(args.family, args.device, header, repo, path)
     OUT.mkdir(parents=True, exist_ok=True)
     dest = OUT / f"{args.device}.json"
-    dest.write_text(json.dumps(db, separators=(",", ":")) + "\n", encoding="utf8")
+    # newline="\n": the shipped maps are LF, and Python's default text-mode translation
+    # would rewrite the whole file as CRLF on Windows and make a regeneration look like
+    # a change to every line.
+    dest.write_text(json.dumps(db, separators=(",", ":")) + "\n",
+                    encoding="utf8", newline="\n")
     print(f"{dest.name}: {len(db['peripherals'])} peripherals, "
           f"{len(db['types'])} struct types, {sum(len(t) for t in db['types'].values())} registers, "
           f"sha256={db['provenance']['header_sha256'][:12]}")

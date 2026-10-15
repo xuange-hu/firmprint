@@ -107,24 +107,26 @@ CI job or a triage pipeline can refuse an untrustworthy report.
 ### 1. Evidence, or it is not a finding
 
 Every `Finding` carries `kind`, `subject`, `confidence`, `engine`, `rule`, a list of
-evidence records, and a list of `unknowns`:
+evidence records, and a list of `unknowns`.  This is the real report for
+`samples/openmv2/firmware.elf`, trimmed to the first of its 9 evidence items:
 
 ```json
 {
   "kind": "peripheral.access",
-  "subject": "USART1",
+  "subject": "CAN1",
   "confidence": 0.86,
   "engine": "capstone/5.0.7",
   "rule": "peripheral.access.tracked-base-register",
+  "evidence_total": 9,
   "evidence": [{
     "kind": "instruction",
-    "note": "0x0802AB10 str r2, [r3, #0xc]  [write]  in ll_uart_init",
-    "file_offset": 175120,
-    "vaddr": "0x0802AB10",
-    "bytes": "5260"
+    "note": "0x08018F00 ldr.w r0, [r3, #0x200]  [read]  in HAL_CAN_ConfigFilter  reached 0x40006600 -> CAN1+0x200 (FMR)",
+    "file_offset": 40704,
+    "vaddr": "0x08018F00",
+    "bytes": "d3f80002",
+    "text": "ldr.w r0, [r3, #0x200]"
   }],
-  "unknowns": ["base-register tracking resets at function boundaries, so a base held "
-               "across a branch is counted as unknown rather than guessed"]
+  "unknowns": ["base-register tracking resets at function boundaries, so a base held across a branch is counted as unknown rather than guessed", "offsets are static; index registers and peripheral aliases are not resolved"]
 }
 ```
 
@@ -323,6 +325,8 @@ pip install -e ".[dev]"
 python -m pytest -q          # 200+ tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
+python tools/check_doc_quotes.py   # every report line quoted in this README and in
+                                   # docs/case-*.md must be what the tool prints today
 ```
 
 Tests are structured around falsifiability, not coverage: several exist specifically to

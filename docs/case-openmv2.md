@@ -42,17 +42,21 @@ names the runner-up instead of hiding it.
 ## 2. The vector table
 
 ```json
-{"kind": "cortex-m.vector_table", "subject": "table@0x08010000", "confidence": 0.849,
- "rule": "cortex-m.vector_table.shape", "engine": "vectors/1",
- "summary": "vector table at 0x08010000: 98 live handlers within 131 scanned slots
-             (8 zeroed, 25 non-code), initial MSP 0x1000F958, reset handler 0x080101AD;
-             76 distinct targets, unused slots are aliased to a default handler; the
-             scan stopped after 24 unused slots, so the live count is a lower bound",
+{
+ "kind": "cortex-m.vector_table",
+ "subject": "table@0x08010000",
+ "confidence": 0.849,
+ "rule": "cortex-m.vector_table.shape",
+ "engine": "vectors/1",
+ "summary": "vector table at 0x08010000: 98 live handlers within 131 scanned slots (8 zeroed, 25 non-code), initial MSP 0x1000F958, reset handler 0x080101AD; 76 distinct targets, unused slots are aliased to a default handler; the scan stopped after 24 unused slots, so the live count is a lower bound",
  "evidence": [
-   {"kind": "bytes", "note": "initial MSP + reset vector (little endian)",
-    "file_offset": 0, "vaddr": "0x08010000", "bytes": "58f90010ad010108"},
-   {"kind": "bytes", "note": "following handler entries", "file_offset": 8,
-    "vaddr": "0x08010008", "bytes": "5324070841240708…"}]}
+  {"kind": "bytes", "note": "initial MSP + reset vector (little endian)",
+   "file_offset": 0, "vaddr": "0x08010000", "bytes": "58f90010ad010108"},
+  {"kind": "bytes", "note": "following handler entries",
+   "file_offset": 8, "vaddr": "0x08010008",
+   "bytes": "532407084124070855240708652407087524070800000000"}
+ ]
+}
 ```
 
 Read the evidence byte string as two little-endian words: `0x1000F958` and `0x080101AD`.
@@ -150,11 +154,11 @@ resolved to `DCMI+0x000 (CR)` at `0x080465AC`, 217 KB into the dump.
 The 81 `peripheral.usage` rows are the weaker, stdlib-only tier:
 
 ```
-peripheral.usage  GPIOE  0.82  GPIOE @0x40012400 referenced 12 times as an address
-                               constant; registers seen: MODER(12)
+peripheral.usage  GPIOE  0.82  GPIOE @0x40021000 referenced 24 times as an address
+                               constant; registers seen: MODER(24)
 ```
 
-`carve/1` proves the constant `0x40012400` is *in the image*.  It does not prove code
+`carve/1` proves the constant `0x40021000` is *in the image*.  It does not prove code
 executed an access, so the row never claims a direction, and the engine label is part of
 the finding rather than a footer.  `--no-code` gives you exactly these 81 and nothing else.
 

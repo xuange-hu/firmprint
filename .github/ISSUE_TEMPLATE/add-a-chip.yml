@@ -1,0 +1,50 @@
+name: Add a chip to the database
+description: A memory map firmprint does not rank against yet
+labels: [socdb]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Maps here are **generated from vendor CMSIS headers**, never typed — that is what
+        lets a report trace a base address back to one upstream file. If CMSIS publishes
+        the header, adding a part is two commands and a PR containing one generated JSON:
+
+        ```bash
+        python tools/gen_socdb.py fetch --family l4 --device stm32l4x5xx
+        python tools/gen_socdb.py build --family l4 --device stm32l4x5xx
+        firmprint socdb list            # the new row must show the header sha256
+        ```
+
+  - type: input
+    id: device
+    attributes:
+      label: Device the map should describe
+      description: The CMSIS define, e.g. `stm32l4x5xx` — not a market part number like `STM32L476RG`.
+    validations:
+      required: true
+  - type: input
+    id: header
+    attributes:
+      label: CMSIS header, as repo + path inside it
+      description: e.g. `STMicroelectronics/cmsis-device-l4` → `Include/stm32l4x5xx.h`
+      placeholder: STMicroelectronics/cmsis-device-l4 / Include/stm32l4x5xx.h
+    validations:
+      required: true
+  - type: textarea
+    id: overlap
+    attributes:
+      label: Which installed map it collides with, and what it would separate
+      description: >
+        The interesting question is not "does the map exist" but "does it help the
+        ranking". If your image currently ranks `stm32f427xx` and `stm32f765xx` with 0
+        exclusive constants between them, say so — and say whether the new map names
+        addresses neither of them can explain. That is the only way a fourth map earns its
+        place.
+  - type: textarea
+    id: holes
+    attributes:
+      label: Anything the generator drops for this part
+      description: >
+        `build` prints peripheral / struct / register counts, and the JSON carries
+        `dropped_low_base_defines`. A silent loss is exactly what is worth reporting here;
+        paste the numbers you got.

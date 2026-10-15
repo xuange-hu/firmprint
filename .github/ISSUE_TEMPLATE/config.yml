@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation question
+    url: https://github.com/xuange-hu/firmprint/blob/main/CONTRIBUTING.md
+    about: The prose quotes real report output; start with the check that keeps it honest, `python tools/check_doc_quotes.py`.
+  - name: Security report
+    url: https://github.com/xuange-hu/firmprint/blob/main/SECURITY.md
+    about: Including anything about parsing untrusted images — this tool's job is to read bytes it is handed.

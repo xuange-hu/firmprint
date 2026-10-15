@@ -244,7 +244,8 @@ def main() -> int:
     for b in boards:
         other = next((o for o in BOARDS if o != b), b)
         text, facts = build(b, other)
-        (out / BOARDS[b][3]).write_text(text, encoding="utf8")
+        # newline="\n" so a Windows contributor produces the same bytes as CI
+        (out / BOARDS[b][3]).write_text(text, encoding="utf8", newline="\n")
         print(f"wrote verification/{BOARDS[b][3]}: {facts['device']} vs {facts['vendor_part']}, "
               f"oracle {facts['recall']}, {facts['violations']} violations, "
               f"{facts['exclusive']} exclusive constants")

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import textwrap
 from pathlib import Path
 
 from . import __version__
@@ -46,6 +47,13 @@ def _short(report: dict, max_findings: int) -> str:
                f"{' / ' + str(meta['container'].get('arch')) if meta['container'].get('arch') else ''}"
                f"  {len(meta['container']['segments'])} segment(s)"
                f"  entry {meta['container'].get('entry') or '-'}")
+    # A raw dump's load base is a *guess the tool made*, and the reason it made it is the
+    # thing a reviewer needs: which origins were tried, which also produced a table.  It
+    # lived only in the JSON, which meant `scan dump.bin` printed an inferred address
+    # with the reasoning hidden -- the opposite of the promise in the README.
+    for note in (meta["container"].get("notes") or [])[:3]:
+        out.append(textwrap.fill(note, width=100, initial_indent=" " * 12,
+                                 subsequent_indent=" " * 12))
     cands = [f for f in report["findings"] if f["kind"] == "soc.candidate"]
     top = cands[0] if cands else None
     if soc and top:

@@ -41,6 +41,22 @@ presented as another's, and do not merge two engines' findings into a single row
 distinction is the reason a reader can weigh a `peripheral.access` against a
 `peripheral.usage`.
 
+**3. A number quoted in prose must be a number the tool prints today.**  `README.md` and
+`docs/case-*.md` paste real report rows, and a heuristic fix silently makes one of them
+stale.  `python tools/check_doc_quotes.py` re-scans every fetched sample and checks each
+quoted row, each wrapped summary tail, and each `` ```json `` fragment against live output
+(JSON fragments must be a *subset* of a real finding, so the docs may elide but not invent).
+It runs in CI in the `verification` job, and it is the gate to run after any change that
+moves a count or a confidence:
+
+```bash
+python tools/check_doc_quotes.py          # needs: python tools/get_sample.py --all
+python tools/check_doc_quotes.py --list   # show every quote it checked
+```
+
+Without `samples/` it prints a note and exits 0 — the dependency-free CI job has nothing to
+compare against, and the check is deliberately not a test of prose style.
+
 ## Writing tests the way this suite is written
 
 Tests here are falsification devices, not coverage devices.  Most of the interesting ones
