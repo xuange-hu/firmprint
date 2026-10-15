@@ -1,5 +1,10 @@
 # firmprint
 
+[![ci](https://github.com/xuange-hu/firmprint/actions/workflows/ci.yml/badge.svg)](https://github.com/xuange-hu/firmprint/actions/workflows/ci.yml)
+![python](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.12-blue)
+![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-informational)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **Firmware identification that shows its work.**
 
 `firmprint` takes a Cortex-M firmware image — an ELF, a raw `.bin` dump pulled off a
