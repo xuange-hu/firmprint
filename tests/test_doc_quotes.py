@@ -135,6 +135,43 @@ def test_a_different_library_version_is_not_a_stale_quote():
                            "engine": "carve/1"}, REAL)
 
 
+def test_header_runs_group_a_transcript_but_not_a_lonely_line():
+    """A multi-line quote is checked as a *contiguous* run; a single line is not a run.
+
+    This is what catches a transcript that drops a printed line: every line left in it is
+    real, so the per-line check passes, while the run -- `file`, `container`, its note,
+    `match` -- is no longer anything the tool printed.  That is how the OpenMV3 case study
+    lost the container note that explains the inferred load base.
+    """
+    lines = ["file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f",
+             "container   raw / arm  1 segment(s)  entry -",
+             "            raw dump: no container header. load base inferred as 0x08010000",
+             "            Pass --base to pin it.",
+             "match       stm32f427xx (f4, cortex-m4)  conf 0.66  best match",
+             "",
+             "kind                    subject              conf  summary",
+             "-" * 40,
+             "peripheral.usage  GPIOE  0.82  GPIOE @0x40021000 referenced 24 times"]
+    assert [len(r) for r in chk.header_runs(lines)] == [5]
+    assert chk.header_runs(["contract    0 violation(s)", ""]) == []
+
+
+def test_a_dropped_note_line_breaks_the_run():
+    """The specific staleness: same lines, minus the CLI's explanation of the guess.
+
+    Two adjacent header lines are still a run -- and the run is what fails, because the
+    live report prints the note between them.
+    """
+    full = ["container   raw / arm  1 segment(s)  entry -",
+            "            load base inferred as 0x08010000: of the 16 origins tested",
+            "match       stm32f427xx (f4, cortex-m4)  conf 0.66  best match"]
+    live = chk.norm("\n".join(full))
+    trimmed = [full[0], full[2]]
+    runs = chk.header_runs(trimmed)
+    assert [len(r) for r in runs] == [2]
+    assert chk.norm(" ".join(runs[0])) not in live
+
+
 def test_a_json_fence_that_does_not_parse_is_still_classified_as_json(tmp_path):
     """The bug worth catching is a ```json block that is not valid JSON.
 

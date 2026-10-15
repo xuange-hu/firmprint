@@ -144,6 +144,27 @@ def quoted(md: Path, want_json: bool) -> list[tuple[str, str]]:
     return out
 
 
+def header_runs(lines: list[str]) -> list[list[str]]:
+    """Consecutive runs of padded header lines plus their indented continuation lines.
+
+    A single quoted header line is checked one at a time elsewhere; this is about *runs*,
+    because a transcript that drops a line the CLI prints -- the container note explaining
+    an inferred load base, say -- is stale even though every line left in it is real.
+    """
+    runs: list[list[str]] = []
+    run: list[str] = []
+    for line in lines + [""]:
+        s = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if HEADER.match(s) or (run and s and indent >= 4):
+            run.append(s)
+        else:
+            if len(run) >= 2:
+                runs.append(run)
+            run = []
+    return runs
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--list", action="store_true", help="print each quote that was checked")
@@ -234,6 +255,18 @@ def main() -> int:
                         print(f"  quote  {rel}: {head[:70]}")
                     if head not in live_text:
                         problems.append(f"{rel}: header line not printed by any real run: {head[:70]}")
+            for run in header_runs(block_lines):
+                text = norm(" ".join(run))
+                if "…" in text or " ..." in text:
+                    continue                      # an elided transcript is a deliberate trim
+                checked += 1
+                if a.list:
+                    print(f"  run    {rel}: {text[:70]}")
+                if text not in live_text:
+                    problems.append(
+                        f"{rel}: {len(run)} header lines quoted as one transcript, but no run "
+                        f"prints them consecutively -- a line was dropped or taken from "
+                        f"another image: {text[:80]}")
 
     print(f"doc quotes: {len(findings)} findings from {len(images)} images, "
           f"{checked} quoted fragments/lines checked")

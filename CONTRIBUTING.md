@@ -62,6 +62,11 @@ python tools/check_doc_quotes.py --list   # show every quote it checked
 Without `samples/` it prints a note and exits 0 — the dependency-free CI job has nothing to
 compare against, and the check is deliberately not a test of prose style.
 
+Multi-line header quotes are compared as *contiguous transcripts*, so a pasted block must
+keep every line the CLI printed in order.  A dropped line is stale even when every surviving
+line is real — that is how the OpenMV3 case study ended up quoting a container note whose
+"origins that also produced tables" list disagreed with the tool by a count and an order.
+
 ## Writing tests the way this suite is written
 
 Tests here are falsification devices, not coverage devices.  Most of the interesting ones

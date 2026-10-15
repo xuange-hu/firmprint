@@ -18,10 +18,10 @@ python tools/get_sample.py --board OPENMV3   # 6 files, pinned by sha256
 $ firmprint scan samples/openmv3/firmware.bin
 file        firmware.bin  1,635,112 B  sha256:f6c41e63f19591d0
 container   raw / arm  1 segment(s)  entry -
-            raw dump: no container header. load base inferred as 0x08020000: of the 17
-            origins tested it is the one whose best candidate reads most like a vector
-            table (1 table(s) there, the first at file offset 0x0); origins that also
-            produced tables: 0x08010000(1), 0x08000000(1). Pass --base to pin it.
+            raw dump: no container header. load base inferred as 0x08020000: of the 17 origins
+            tested it is the one whose best candidate reads most like a vector table (1 table(s)
+            there, the first at file offset 0x0); origins that also produced tables: 0x08000000(1),
+            0x08010000(2). Pass --base to pin it.
 match       stm32f765xx (f7, cortex-m7)  conf 0.76  best match
 ```
 
