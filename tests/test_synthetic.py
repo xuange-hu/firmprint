@@ -100,6 +100,24 @@ def test_the_strict_scan_of_the_synthetic_image_produces_rows(tmp_path, capsys):
     assert match.startswith("match       ?"), match
 
 
+def test_a_single_reference_is_written_in_the_singular(tmp_path, capsys):
+    """`referenced 1 times` is the sort of detail that makes a report look uncareful.
+
+    The synthetic image carries exactly one device constant, so it is the only fixture that
+    can prove the plural follows the count instead of being hard-coded into the sentence.
+    """
+    import json
+
+    gen = _load_script()
+    blob = tmp_path / "blob.bin"
+    blob.write_bytes(gen.build())
+    assert cli.main(["scan", str(blob), "--no-code", "--format", "json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    rows = [f["summary"] for f in report["findings"] if f["kind"] == "peripheral.usage"]
+    assert rows and all(" 1 time as an address constant" in s for s in rows), rows
+    assert not any("1 times" in f["summary"] for f in report["findings"])
+
+
 def test_the_dependency_free_path_still_answers(tmp_path, capsys):
     """On a box that refused to install capstone the stdlib engines must carry the report."""
     gen = _load_script()

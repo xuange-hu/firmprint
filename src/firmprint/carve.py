@@ -155,7 +155,8 @@ def usage_findings(per: dict[str, dict], soc: Soc, engine: str = "carve/1") -> l
             kind=kind,
             subject=pname,
             confidence=0.55 if entry["total"] < 3 else 0.7 if entry["total"] < 10 else 0.82,
-            summary=(f"{pname} @0x{base:08X} referenced {entry['total']} times "
+            summary=(f"{pname} @0x{base:08X} referenced {entry['total']} "
+                     f"{'time' if entry['total'] == 1 else 'times'} "
                      f"as an address constant; " + why
                      + ", ".join(f"{r}({n})" for r, n in regs[:6])),
             engine=engine,
