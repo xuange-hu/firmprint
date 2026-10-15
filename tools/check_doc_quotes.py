@@ -36,7 +36,18 @@ from firmprint import cli, decode  # noqa: E402
 DOCS = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
 KINDS = ("cortex-m", "soc", "peripheral", "memory", "region", "container")
 HEADERS = ("file", "container", "match", "candidates", "engines", "decoded", "contract")
-FINDING = re.compile(r"^([a-z][a-z0-9._-]*(?:\.[a-z_]+)?)\s+(\S+)\s+(0\.\d{2,3})\b")
+FINDING = re.compile(r"^([a-z][a-z0-9._-]*(?:\.[a-z_]+)?)\s{2,}(\S+)\s{2,}(0\.\d{2,3})\b")
+# A row the CLI printed is column-padded; prose that merely *mentions* a confidence is not
+# ("capped at 0.66 and prefixed ...").  Requiring the padding is what keeps an English
+# sentence from being checked as a quote -- and LOOSE is what keeps the opposite mistake, a
+# real quote written without padding, from being silently skipped instead of reported.
+LOOSE = re.compile(r"^([a-z][a-z0-9._-]*(?:\.[a-z_]+)?)\s+(\S+)\s+(0\.\d{2,3})\b")
+# what the second column of a real row never is: an English word.  "soc.candidate is 0.76"
+# inside a code block is a sentence about a row, not a row, and reporting it as a
+# formatting problem would train people to ignore the checker.
+NOT_A_SUBJECT = {"is", "are", "was", "were", "at", "in", "on", "of", "to", "by", "as",
+                 "and", "or", "but", "with", "that", "this", "it", "we", "be", "not",
+                 "has", "have", "sits", "scores", "reads", "prints", "means", "gets"}
 # the padded column headers the CLI prints; a prose line that merely starts with one of
 # these words ("container note:", "file offset 430") is not a header quote
 HEADER = re.compile(rf"^({'|'.join(HEADERS)})\s{{2,}}\S")
@@ -196,6 +207,12 @@ def main() -> int:
                         problems.append(f"{rel}: {m.group(1)}/{m.group(2)} at "
                                         f"{m.group(3)} is real, but no run prints the "
                                         f"summary quoted here: {quoted_tail[:70]}")
+                elif (lm := LOOSE.match(s)) and lm.group(1).startswith(KINDS) \
+                        and lm.group(2) not in NOT_A_SUBJECT \
+                        and "..." not in s and "…" not in s:
+                    problems.append(f"{rel}: {s[:70]} -- looks like a quoted finding row "
+                                    f"but is not column-padded, so this checker would skip "
+                                    f"it; re-paste it the way the CLI prints it")
                 elif HEADER.match(s):
                     head = flat(s.split("…")[0].split(" ...")[0].rstrip(". "))
                     checked += 1

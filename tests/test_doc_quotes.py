@@ -1,0 +1,169 @@
+"""Tests for the tool that tests the documentation.
+
+`tools/check_doc_quotes.py` exists because prose that pastes real report output goes stale
+silently: a confidence rewritten to three decimals, a count that changed when a heuristic
+was fixed.  A checker with a broken regex is worse than no checker -- it prints "ok" while
+comparing nothing -- so the checker itself is pinned here, the same way the heuristics are:
+each test states a stale quote and asserts the tool notices.
+
+The end-to-end pass is opt-in (`FIRMPRINT_DOC_QUOTES=1`) because it re-scans all ten sample
+images twice; CI's `verification` job runs `tools/check_doc_quotes.py` directly, so the
+gate exists whether or not this test is enabled.
+"""
+from __future__ import annotations
+
+import contextlib
+import importlib.util
+import json
+import os
+import re
+import sys
+
+import pytest
+from conftest import ROOT
+
+
+def _load_checker():
+    """Checkout-only: a wheel does not ship `tools/`."""
+    script = ROOT / "tools" / "check_doc_quotes.py"
+    if not script.exists():
+        pytest.skip("the checker lives in the repository checkout", allow_module_level=True)
+    spec = importlib.util.spec_from_file_location("check_doc_quotes", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+chk = _load_checker()
+
+REAL = {
+    "kind": "peripheral.access",
+    "subject": "DCMI",
+    "confidence": 0.86,
+    "engine": "capstone/5.0.7",
+    "rule": "peripheral.access.tracked-base-register",
+    "summary": "DCMI: 6 decoded load/store(s) through a tracked base register; CR/read=4, CR/write=2",
+    "metrics": {"accesses": 6, "exclusive_constants": 0},
+    "evidence": [{"kind": "instruction", "vaddr": "0x080465AC", "bytes": "9a60",
+                  "note": "ldr r2, [r3]  [read]  reached 0x50050000 -> DCMI+0x000 (CR)"}],
+    "unknowns": ["base-register tracking resets at function boundaries"],
+}
+
+
+def test_a_fragment_that_elides_and_rewraps_still_matches():
+    """The docs are allowed to shorten a quote, not to change what it says."""
+    frag = {"kind": "peripheral.access", "subject": "DCMI", "confidence": 0.86,
+            "summary": "6 decoded load/store(s)"}
+    assert chk.subset(frag, REAL)
+
+
+@pytest.mark.parametrize("frag", [
+    {"kind": "peripheral.access", "subject": "DCMI", "confidence": 0.85},
+    {"kind": "peripheral.access", "subject": "DCMI", "metrics": {"accesses": 265}},
+    {"kind": "peripheral.access", "subject": "DCMI",
+     "summary": "DCMI: 6 decoded load/store(s) through an untracked base"},
+    {"kind": "peripheral.access", "subject": "DCMI", "confidence_band": "high"},
+    {"kind": "peripheral.access", "subject": "DCMI",
+     "evidence": [{"vaddr": "0x080465AC", "bytes": "beef"}]},
+])
+def test_a_stale_number_or_an_invented_field_is_not_a_subset(frag):
+    """The whole point: `265` where the run printed `6` must fail, not paraphrase-match.
+
+    The last case also pins that a *list* is matched item by item -- a doc pastes the one
+    evidence record it cares about, not all 24.
+    """
+    assert not chk.subset(frag, REAL)
+
+
+def test_a_prose_line_is_not_mistaken_for_a_padded_header():
+    """"file offset 430" is English; "file   firmware.bin  790,416 B" is a CLI row.
+
+    Conflating them made every prose sentence starting with one of those words a "quote"
+    the checker had to fail on.
+    """
+    assert chk.HEADER.match("candidates  stm32f427xx=89 constants/81 blocks")
+    assert chk.HEADER.match("container   raw / arm  1 segment(s)  entry -")
+    assert not chk.HEADER.match("file offset 430 is where the table starts")
+    assert not chk.HEADER.match("container note: capstone not installed")
+
+
+def test_the_finding_row_regex_needs_the_columns():
+    """A sentence like "peripheral.usage is 0.82" must not parse as a quoted row."""
+    assert chk.FINDING.match("peripheral.usage  GPIOE  0.82  GPIOE @0x40021000 ...")
+    assert not chk.FINDING.match("peripheral.usage is 0.82 because carve is weaker")
+
+
+def test_an_unpadded_quote_is_caught_instead_of_silently_skipped():
+    """The failure mode of the tightened regex: a real row pasted with single spaces.
+
+    `FINDING` requires the CLI's column padding, so an unpadded row would simply stop
+    being checked -- a silent pass.  `LOOSE` is what turns that into a reported problem.
+    """
+    s = "peripheral.usage GPIOE 0.82 GPIOE @0x40021000 referenced 24 times"
+    assert not chk.FINDING.match(s)
+    m = chk.LOOSE.match(s)
+    assert m and m.group(1).startswith(chk.KINDS) and m.group(2) not in chk.NOT_A_SUBJECT
+
+
+def test_a_sentence_inside_a_block_stays_a_sentence():
+    """"soc.candidate is 0.76" is prose about a row, and flagging it would be noise."""
+    for s in ("soc.candidate is 0.76 on the F7 image",
+              "memory.reference is 0.82 whenever carve agrees"):
+        m = chk.LOOSE.match(s)
+        assert m and m.group(2) in chk.NOT_A_SUBJECT, s
+
+
+def test_whitespace_flattening_survives_a_rewrap():
+    """Docs wrap at 80 columns; the CLI did not wrap that way on the terminal that printed it."""
+    got = chk.flat("GPIOE @0x40021000 referenced 24 times as an address\n"
+                   "                               constant; registers seen: MODER(24)")
+    assert got == ("GPIOE @0x40021000 referenced 24 times as an address constant; "
+                   "registers seen: MODER(24)")
+
+
+def test_a_json_fence_that_does_not_parse_is_still_classified_as_json(tmp_path):
+    """The bug worth catching is a ```json block that is not valid JSON.
+
+    Classifying by parse success would drop it into the prose bucket and check it as text,
+    which is exactly how a line-wrapped string inside a quoted finding stopped being an
+    error for a while.
+    """
+    md = tmp_path / "x.md"
+    md.write_text('```json\n{"kind": "soc.candidate",\n "summary": "unclosed\n```\n',
+                  encoding="utf8")
+    blocks = chk.quoted(md, want_json=True)
+    assert len(blocks) == 1
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(blocks[0][1])
+    assert chk.quoted(md, want_json=False) == []
+
+
+@contextlib.contextmanager
+def _clean_argv():
+    """The checker reads argv; a test must not inherit pytest's."""
+    saved = sys.argv
+    sys.argv = ["check_doc_quotes.py"]
+    try:
+        yield
+    finally:
+        sys.argv = saved
+
+
+@pytest.mark.skipif(not os.environ.get("FIRMPRINT_DOC_QUOTES"),
+                    reason="set FIRMPRINT_DOC_QUOTES=1 (CI runs the checker directly)")
+def test_the_repo_prose_passes_and_is_actually_checked(capsys):
+    """End-to-end over README.md and docs/case-*.md, against live scans.
+
+    The assertion on `checked` is the one that matters: a checker whose regexes stopped
+    matching prints the same "ok" as a checker that found nothing stale.
+    """
+    images = sorted(p for p in (ROOT / "samples").glob("*/*")
+                    if p.suffix in (".bin", ".elf") and p.is_file())
+    if not images:
+        pytest.skip("run `python tools/get_sample.py --all` to check the prose")
+    with _clean_argv():
+        rc = chk.main()
+    report = capsys.readouterr().out
+    assert rc == 0, report
+    n = int(re.search(r"(\d+) quoted fragments/lines checked", report).group(1))
+    assert n >= 20, f"the checker found only {n} quotes; its patterns are stale:\n{report}"
