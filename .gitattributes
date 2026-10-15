@@ -1,0 +1,22 @@
+# The repository stores LF, and so does the checkout.
+#
+# This is not cosmetics: `tools/gen_socdb.py` hashes header bytes, the evidence
+# contract quotes file offsets, and the CI job that regenerates `verification/*.md`
+# diffs them against the committed documents.  All three would depend on the
+# line-ending preference of whoever cloned the repo if git were allowed to convert.
+* text=auto eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.toml  text eol=lf
+*.typed text eol=lf
+*.cfg   text eol=lf
+
+# Nothing binary is supposed to be here (firmware images are fetched on demand and
+# gitignored), but a stray one must never be line-ending "fixed".
+*.bin   binary
+*.elf   binary
+*.hex   binary
+*.png   binary
+*.gz    binary

@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firmprint"
+version = "0.1.0"
+description = "Evidence-backed firmware identification for Cortex-M images: every claim carries the offset and bytes that produced it"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["firmware", "reverse-engineering", "cortex-m", "stm32", "embedded",
+            "dfir", "vector-table", "mcp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Embedded Systems",
+    "Typing :: Typed",
+]
+
+# Zero required dependencies: a forensics tool that cannot install because of a
+# transitive wheel is a tool nobody runs on an incident machine.
+dependencies = []
+
+[project.optional-dependencies]
+# Turns "the constant 0x40011000 is somewhere in the image" into
+# "HAL_UART_Init stores to USART1+CR1". Absent, the scan still runs.
+capstone = ["capstone>=5.0.1"]
+dev = ["pytest>=7", "ruff>=0.4", "capstone>=5.0.1"]
+
+[project.scripts]
+firmprint = "firmprint.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/xuange-hu/firmprint"
+Verification = "https://github.com/xuange-hu/firmprint/blob/main/verification/openmv2.md"
+"Security & dual-use" = "https://github.com/xuange-hu/firmprint/blob/main/SECURITY.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+firmprint = ["data/*.json", "py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+# E501: the report prose is written to read well in a terminal, not to a column.
+# SIM105: `try/except/pass` reads better than a contextlib wrapper for the optional-import guard.
+ignore = ["E501", "SIM105"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

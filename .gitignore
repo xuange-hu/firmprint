@@ -1,0 +1,24 @@
+# third-party firmware images: fetched by `python tools/get_sample.py`, pinned by sha256
+# (committing someone else's build artifacts would be the wrong licence story)
+samples/
+
+# CMSIS headers cached by tools/gen_socdb.py; regenerable, ~2 MB each
+socdb-src/
+
+# local scratch
+reports/
+*.report.json
+*.report.md
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+Thumbs.db

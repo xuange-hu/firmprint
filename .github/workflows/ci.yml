@@ -1,0 +1,121 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    # The dependency-free path: this must pass on a machine that refused to install
+    # capstone, because that is the install a forensics box actually gets.
+    name: py${{ matrix.python }} / ${{ matrix.os }} / capstone=${{ matrix.capstone }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12"]
+        capstone: ["with", "without"]
+        exclude:
+          # one macOS runner is enough for a pure-Python package; the matrix is
+          # about interpreter × platform, not about burning three runners per commit
+          - os: macos-latest
+            capstone: "without"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install (no extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest ruff
+
+      - name: Add capstone
+        if: matrix.capstone == 'with'
+        run: python -m pip install "capstone>=5.0.1"
+
+      - name: Lint
+        run: python -m ruff check src tools tests
+
+      - name: Confirm the optional dependency really is optional
+        run: python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('capstone') is None else 1)"
+        if: matrix.capstone == 'without'
+
+      - name: Tests (samples absent -> sample tests skip, the rest must pass)
+        run: python -m pytest -q
+
+      - name: MCP server self-test
+        run: python -m firmprint mcp --self-test
+
+      - name: Stdlib scan must still answer on a synthetic image
+        # `tools/make_synthetic.py` is the same file a reader uses before downloading a
+        # sample, so this job proves the dependency-free path works without a network.
+        run: |
+          python tools/make_synthetic.py blob.bin --print-summary
+          python -m firmprint scan blob.bin --no-code --format json > out.json
+          python -c "import json;d=json.load(open('out.json'));assert d['contract']['violations']==0,d['contract']"
+          python -m firmprint scan blob.bin --no-code --strict
+
+  verification:
+    # The answer key.  Needs the samples, so it is the one job that talks to GitHub
+    # releases -- and it rewrites nothing, it only diffs.
+    name: verification documents (real firmware)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install with capstone
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[capstone]"
+
+      - name: Fetch pinned MIT-licensed samples
+        run: python tools/get_sample.py --all
+
+      - name: Score against the image's own symbols (both boards)
+        run: |
+          python -m firmprint verify samples/openmv2/firmware.elf | tail -20
+          python -m firmprint verify samples/openmv3/firmware.elf | tail -20
+
+      - name: Strict scans must fail closed on zero violations
+        run: |
+          for f in samples/openmv2/firmware.bin samples/openmv3/firmware.bin samples/openmv2/openmv.bin samples/openmv3/openmv.bin; do
+            python -m firmprint scan "$f" --strict > /dev/null || exit 1
+            echo "ok: $f"
+          done
+
+      - name: Regenerate the verification documents and diff
+        run: |
+          python tools/make_verification.py
+          # Keep only added/removed content lines, then drop the one line that is a
+          # property of the runner rather than of the answer key: wall-clock timings.
+          git diff --ignore-all-space -- verification/ \
+            | grep -E '^[-+]' \
+            | grep -Ev '^(---|\+\+\+) ' \
+            | grep -Ev '^[-+]- runtimes:' > verification.diff || true
+          if [ -s verification.diff ]; then
+            echo "::error::verification/*.md changed -- commit the regenerated documents (see CONTRIBUTING.md)"
+            head -80 verification.diff
+            exit 1
+          fi
+          echo "verification documents reproduce byte-for-byte (modulo runtimes)"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: verification-diff
+          path: verification.diff
+          if-no-files-found: ignore
