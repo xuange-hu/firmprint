@@ -86,7 +86,7 @@ pip install -e ".[dev]"
 python tools/make_synthetic.py blob.bin   # a shaped Cortex-M image: no download, no key
 firmprint scan blob.bin --strict          # the dependency-free path still answers
 python tools/get_sample.py --all          # 2 MIT-licensed OpenMV images, pinned by sha256
-python -m pytest -q                       # 200+ tests, no network
+python -m pytest -q                       # 250+ tests, no network
 ```
 
 ## 30-second tour

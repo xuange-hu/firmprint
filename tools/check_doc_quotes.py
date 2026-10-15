@@ -29,9 +29,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import io
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -109,6 +111,28 @@ def subset(frag: dict, real: dict) -> bool:
     return True
 
 
+SYNTH_DIR = ROOT / "reports" / "docquotes-synthetic"
+
+
+def synthetic_image() -> Path | None:
+    """The blob a stranger builds before downloading anything, under `reports/` (gitignored).
+
+    The README tells them what `firmprint scan blob.bin --strict` answers, and a claim about
+    the first thing a reader is told to run is a claim the docs gate should cover.  None if
+    this is an installed wheel without `tools/`.
+    """
+    script = ROOT / "tools" / "make_synthetic.py"
+    if not script.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("make_synthetic", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    blob = SYNTH_DIR / "synthetic" / "blob.bin"
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(module.build())
+    return blob
+
+
 def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[str]]]:
     """Return (every finding, the whole live corpus, the corpus per sample directory).
 
@@ -163,7 +187,10 @@ def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[s
             counts = [f"counts  {tag} {sink}: {len(got)} findings, {v} violations"]
             for kind in sorted({f["kind"] for f in got}):
                 n = sum(1 for f in got if f["kind"] == kind)
-                counts.append(f"counts  {tag} {sink}: {n} rows of {kind}")
+                # grammatical, because a doc that says "1 row of `cortex-m.vector_table`"
+                # has to find that exact phrase in the corpus to be believed
+                counts.append(f"counts  {tag} {sink}: {n} {'row' if n == 1 else 'rows'} "
+                              f"of {kind}")
             lines.extend(counts)
             board.extend(counts)
         # the metric the ranking reports and the prose quotes: how much of the image only
@@ -389,7 +416,13 @@ def main() -> int:
               "(the dependency-free CI job does not need this check)")
         return 0
 
+    # the image the README tells a stranger to make before downloading anything is part of
+    # the corpus, so a sentence about what `scan blob.bin` answers is checked too
+    blob = synthetic_image()
+    if blob is not None:
+        images = [*images, blob]
     findings, lines, boards = run_all(images)
+    shutil.rmtree(SYNTH_DIR, ignore_errors=True)
     live_text = norm("\n".join(lines))
     # the same corpus with its lines intact, for prose claims: `norm` folds newlines away,
     # which is right for matching a re-wrapped quote and wrong for deciding whether a run
