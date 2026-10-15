@@ -281,6 +281,10 @@ def header_runs(lines: list[str]) -> list[list[str]]:
 # The nouns a number in prose is claiming about this tool's own output.  Deliberately
 # narrow: `128 KB bootloader` and `Python 3.10` are facts about the firmware and the
 # interpreter, and what makes a claim checkable is that it names a report quantity.
+# Widening this list was tried (`bytes`, `entries`, `items`, `symbols`, `fields`) and it
+# produced false alarms of a specific kind: those numbers are true, but the report prints
+# `790,416 B` and `(8 zeroed, 25 non-code)`, so adjacency to the doc's word fails.  A noun
+# belongs here only when the tool itself prints that word next to the number.
 NOUNS = ("findings?", "instructions?", "blocks?", "constants?", "access(?:es)?",
          "slots", "handlers", "violations?", "structs?", "maps?", "registers",
          "origins", "tables?", "times", "sites", "rows?", "columns?", "functions?")

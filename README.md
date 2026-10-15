@@ -106,7 +106,7 @@ firmprint mcp --self-test                         # check the MCP server without
 Exit codes are scriptable: `--strict` makes a non-empty evidence contract a failure, so a
 CI job or a triage pipeline can refuse an untrustworthy report.
 
-## The two things that make it different
+## What makes it different
 
 ### 1. Evidence, or it is not a finding
 
@@ -173,6 +173,21 @@ Then it behaves differently depending on what those say:
   device addresses decoded instructions reached that its map cannot name, and says
   whether another installed map can (contested: a threat to the match) or none can
   (a hole in the databases, not evidence of a wrong part).
+
+### 3. The documentation is a test fixture
+
+Every report line pasted in this README and in `docs/case-*.md` is compared against a live
+scan of the real images in CI — and so is every number in a *sentence*, not just in a
+transcript: that the ELF run decodes 202,041 instructions, that a table of 131 scanned slots
+had 98 of them live, that the vector scan stops after 24 consecutive unused slots (that one
+is read out of the code, so moving the constant without moving the prose fails the build).
+
+`python tools/check_doc_quotes.py` re-scans every sample, rebuilds the synthetic image the
+quickstart tells you to make, and refuses a document whose counts no run produces. A
+heuristic tweak that moves a number has to move the sentence in the same commit.  A number
+invented for rhetorical effect does not survive the gate — which is the point: the claim of
+this tool is that a statement arrives with the evidence for it, and that includes statements
+this repository makes about itself.
 
 ## Verification: an answer key, not a promise
 
