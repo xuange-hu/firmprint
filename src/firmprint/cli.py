@@ -23,6 +23,12 @@ from . import __version__
 from .analyze import SCHEMA, analyze, to_markdown
 from .socdb import DATA_DIR, available, load_soc
 
+# How many rows the text table shows before it says "... N more finding(s)".  This is a
+# documented number -- the README explains why `soc.candidate` does not appear in a plain
+# `scan` -- so it lives here as a name rather than as a literal, and
+# `tools/check_doc_quotes.py` prints it into the corpus it checks prose against.
+DEFAULT_MAX_FINDINGS = 30
+
 
 def _num(text: str) -> int:
     return int(text, 16) if text.lower().startswith(("0x", "-0x")) else int(text)
@@ -202,7 +208,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--format", choices=["text", "json", "md"], default="text")
     s.add_argument("--json", help="also write the machine-readable report")
     s.add_argument("--md", help="also write a markdown report")
-    s.add_argument("--max-findings", type=int, default=30)
+    s.add_argument("--max-findings", type=int, default=DEFAULT_MAX_FINDINGS,
+                   help="rows the text table shows before it says how many are left "
+                        f"(default {DEFAULT_MAX_FINDINGS})")
     s.add_argument("--strict", action="store_true", help="exit non-zero on contract violations")
     s.set_defaults(fn=cmd_scan)
 

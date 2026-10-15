@@ -140,7 +140,7 @@ An evidence list of floating prose is decoration, not proof, and the tool report
 violation. So does the contract line at the top of every run.
 
 Two engine tiers are kept apart on purpose, because collapsing them is how a tool turns
-40 unsupported block references into 40 register accesses:
+unsupported block references into claimed register accesses:
 
 | tier | kind | what it can say |
 |---|---|---|
@@ -326,11 +326,12 @@ for the two worked analyses.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q          # 200+ tests; the sample-dependent ones skip cleanly
+python -m pytest -q          # 250+ tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
-python tools/check_doc_quotes.py   # every report line quoted in this README and in
-                                   # docs/case-*.md must be what the tool prints today
+python tools/check_doc_quotes.py   # every report line *and every number in a sentence*
+                                   # quoted in this README and docs/case-*.md must be what
+                                   # the tool prints today, against live scans
 ```
 
 Tests are structured around falsifiability, not coverage: several exist specifically to

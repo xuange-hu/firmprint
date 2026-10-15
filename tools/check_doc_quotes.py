@@ -6,12 +6,20 @@ rewritten to three decimals, a summary gets paraphrased, a count changes because
 heuristic was fixed.  Each of those is a documentation bug of the worst kind, because the
 whole argument of this project is that a claim comes with its evidence.
 
-So the quotes are machine-checked, in two ways:
+So the quotes are machine-checked, in three ways:
 
   * a ```json fragment must be a *subset* of some real finding (every key it shows has to
     carry that finding's value, strings matched as substrings because the docs elide);
-  * a text-shaped `kind subject conf` line, and a header line (`match`, `candidates`,
-    `decoded`, `contract`, `engines`, `file`, `container`), must match a real run.
+  * a text-shaped `kind subject conf` line, a header line (`match`, `candidates`,
+    `decoded`, `contract`, `engines`, `file`, `container`) and any run of them quoted as a
+    transcript must match a real run;
+  * a number in a *sentence* -- outside the fenced blocks -- that names a report quantity
+    ("the 81 `peripheral.usage` rows", "28 further blocks", "stops after 24 consecutive
+    unused slots") must be printed by some real run.  This is the check that catches the
+    worst kind of doc bug, an illustrative number that was never measured; the fix is either
+    to say it without inventing a count or to make the number real, because the corpus here
+    is derived from runs and from the two documented constants it reads out of `cli` and
+    `vectors`, never typed in.
 
 Usage:
     python tools/check_doc_quotes.py            # needs samples/ fetched
@@ -31,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if (ROOT / "src").exists():                                   # run from a checkout
     sys.path.insert(0, str(ROOT / "src"))
 
-from firmprint import cli, decode  # noqa: E402
+from firmprint import cli, decode, vectors  # noqa: E402
 
 DOCS = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
 KINDS = ("cortex-m", "soc", "peripheral", "memory", "region", "container")
@@ -101,25 +109,103 @@ def subset(frag: dict, real: dict) -> bool:
     return True
 
 
-def run_all(images: list[Path]) -> tuple[list[dict], list[str]]:
-    """Return (every finding from every image, every plain-text line they printed)."""
+def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[str]]]:
+    """Return (every finding, the whole live corpus, the corpus per sample directory).
+
+    The corpus is the printed text of every scan *plus* the counts nobody prints in a
+    sentence's own words: total findings per image, findings per kind, the same two for a
+    `--no-code` run, the per-map exclusivity the ranking is built on, the score the symbol
+    oracle gives an ELF, and `socdb list`.  Prose asserts things like "the 81
+    `peripheral.usage` rows" and "33 blocks were reported that the oracle cannot name", and a
+    checker that only reads the report body cannot tell whether they are true.
+
+    Every added line is *derived from a real run*, never typed in: the numbers in it are
+    recomputed here from the same report objects the CLI printed.
+
+    The per-directory grouping exists because a case study is about one board: "28 further
+    blocks" in the OpenMV2 write-up is a claim about *OpenMV2*, and a corpus that also holds
+    OpenMV3's runs lets a wrong number pass because some other image happens to print it.
+    """
+    from firmprint.container import load
+    from firmprint.verify import compare, symbol_oracle
+
     findings: list[dict] = []
     lines: list[str] = []
+    by_board: dict[str, list[str]] = {}
     for path in images:
-        for fmt in ("json", "text"):
-            buf = io.StringIO()
-            args = ["scan", str(path), "--format", fmt, "--max-findings", "10000"]
-            if not decode.available():
+        tag = f"{path.parent.name}/{path.name}"
+        board = by_board.setdefault(path.parent.name, [])
+        full: dict = {}
+        for args, sink in ((["scan", str(path), "--format", "json", "--max-findings", "10000"],
+                            "json"),
+                           (["scan", str(path), "--format", "text", "--max-findings", "10000"],
+                            "text"),
+                           (["scan", str(path), "--format", "json", "--no-code",
+                             "--max-findings", "10000"], "no-code")):
+            if sink == "json" and not decode.available():
                 args.append("--no-code")
+            buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 rc = cli.main(args)
             if rc != 0:
                 raise SystemExit(f"scan failed on {path.name} ({rc}): {buf.getvalue()[:200]}")
-            if fmt == "json":
-                findings.extend(json.loads(buf.getvalue())["findings"])
-            else:
-                lines.extend(buf.getvalue().splitlines())
-    return findings, lines
+            if sink == "text":
+                printed = buf.getvalue().splitlines()
+                lines.extend(printed)
+                board.extend(printed)
+                continue
+            report = json.loads(buf.getvalue())
+            got = report["findings"]
+            if sink == "json":
+                findings.extend(got)
+                full = report
+            v = len(report.get("contract", {}).get("violations", []))
+            counts = [f"counts  {tag} {sink}: {len(got)} findings, {v} violations"]
+            for kind in sorted({f["kind"] for f in got}):
+                n = sum(1 for f in got if f["kind"] == kind)
+                counts.append(f"counts  {tag} {sink}: {n} rows of {kind}")
+            lines.extend(counts)
+            board.extend(counts)
+        # the metric the ranking reports and the prose quotes: how much of the image only
+        # this map can see
+        derived = []
+        for f in full.get("findings", []):
+            if f["kind"] == "soc.candidate":
+                m = f.get("metrics", {})
+                for key, words in (("exclusive_constants", "exclusive constants"),
+                                   ("blind_constants", "constants this map cannot see"),
+                                   ("constants_explained", "constants explained")):
+                    if key in m:
+                        derived.append(f"counts  {tag}: {f['subject']} {m[key]} {words}")
+        # an ELF carries its own truth, and `verify` scores it; the docs quote that score
+        if path.suffix == ".elf":
+            modules, _samples = symbol_oracle(load(str(path)).symbols)
+            if modules:
+                r = compare(full, modules)
+                derived += [
+                    f"counts  {tag} oracle: {len(r['unconfirmed_peripherals'])} blocks the "
+                    f"driver oracle cannot name",
+                    f"counts  {tag} oracle: {r['confirmed']}/{r['oracle_modules']} drivers "
+                    f"confirmed",
+                    f"counts  {tag} oracle: {r['detected_peripherals']} peripheral blocks "
+                    f"with address evidence"]
+        lines.extend(derived)
+        board.extend(derived)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli.main(["socdb", "list"])
+    # `socdb list` is the installed database and the two documented limits are properties of
+    # the tool, not of one image, so both belong to every board's corpus as well as the whole
+    shared = buf.getvalue().splitlines() + [
+        # the row cap of the text table and the gap that ends a vector-table scan: no scan
+        # prints either unless it happens to hit it, so read them out of the source and let a
+        # doc quote them only while the code still does
+        f"defaults  the text table caps at {cli.DEFAULT_MAX_FINDINGS} findings",
+        f"defaults  the vector scan stops after {vectors.MAX_GAP} consecutive unused slots"]
+    lines.extend(shared)
+    for board_lines in by_board.values():
+        board_lines.extend(shared)
+    return findings, lines, by_board
 
 
 def quoted(md: Path, want_json: bool) -> list[tuple[str, str]]:
@@ -165,10 +251,136 @@ def header_runs(lines: list[str]) -> list[list[str]]:
     return runs
 
 
+# The nouns a number in prose is claiming about this tool's own output.  Deliberately
+# narrow: `128 KB bootloader` and `Python 3.10` are facts about the firmware and the
+# interpreter, and what makes a claim checkable is that it names a report quantity.
+NOUNS = ("findings?", "instructions?", "blocks?", "constants?", "access(?:es)?",
+         "slots", "handlers", "violations?", "structs?", "maps?", "registers",
+         "origins", "tables?", "times", "sites", "rows?", "columns?", "functions?")
+# a number is only "about" a noun when nothing but a lowercase word or two separates them --
+# the alternative turns every pipe-delimited table cell into a claim about its neighbour, and
+# `(?<![\w.#,])` / `(?![.\dx,])` keep "202" from being read out of "202,041"
+NUMBER = re.compile(r"(?<![\w.#,-])(?!\d+x)(\d{1,3}(?:,\d{3})+|\d+)(?![.\dx,-])")
+CLAIM = re.compile(
+    rf"{NUMBER.pattern}\s+(?:[a-z][a-z0-9`_.-]*\s+){{0,2}}\b({'|'.join(NOUNS)})\b")
+# the same pair, searched in the live corpus, with the gap opened up by one word: easier to
+# satisfy there than here, so a claim that is real is never lost to formatting
+PRINTED = r"\b%s\s+(?:\S+\s+){0,3}%s"
+
+
+def singular(noun: str) -> str | None:
+    """The stem a generated row would print for this plural, or None if it has none.
+
+    English here, not the CLI's: `tables` -> `table`, `accesses` -> `access`, and `access`
+    stays `access` rather than becoming `acces`.
+    """
+    if noun.endswith(("ses", "xes", "zes", "ches", "shes")):
+        return noun[:-2]
+    if noun.endswith("s") and not noun.endswith(("ss", "us", "is")):
+        return noun[:-1]
+    return None
+
+
+def noun_pattern(noun: str) -> str:
+    """`tables` also matches the generated spellings `table` and `table(s)`.
+
+    Prose pluralises the way people do; this CLI pluralises the way `f"{n} table(s)"` does,
+    so the check has to know that "2 vector tables" and "2 table(s)" are the same claim.
+    Only the corpus side gets this licence -- a doc that writes a wrong count still fails.
+    The boundaries live inside each alternative because `table(s)` cannot end with `\\b`.
+    """
+    out = [r"\b" + re.escape(noun) + r"\b"]
+    stem = singular(noun)
+    if stem:
+        out += [r"\b" + re.escape(stem) + r"\b", r"\b" + re.escape(stem) + r"\(s\)"]
+    return "(?:" + "|".join(out) + ")"
+
+
+def prose(text: str) -> str:
+    """The markdown *outside* fenced blocks -- the sentences, not the pasted reports."""
+    return re.sub(r"```[^\n]*\n.*?```", "\n", text, flags=re.S)
+
+
+def prose_units(text: str) -> list[str]:
+    """Paragraphs with their line wrapping folded out; table rows kept one per unit.
+
+    Wrapping has to go, or "`peripheral.usage` rows" at the end of a line never reaches the
+    "81" at the start of the next and a true claim is reported as false.  Table rows must
+    *stay* separate, or the count in one cell becomes a claim about the word in the next
+    column and every table in the docs turns into invented assertions.
+    """
+    units: list[str] = []
+    para: list[str] = []
+
+    def flush() -> None:
+        if para:
+            units.append(flat(" ".join(para)))
+            para.clear()
+
+    for line in prose(text).splitlines():
+        s = line.strip()
+        if not s:
+            flush()
+        elif s.startswith("|"):
+            flush()
+            units.append(s)
+        else:
+            para.append(s)
+    flush()
+    return units
+
+
+def prose_claims(text: str) -> list[tuple[str, str, str]]:
+    """(number, noun, context) for every report-shaped number the sentences assert.
+
+    The noun is captured exactly as written, singular or plural, because the other side of
+    the comparison is generated text with the same spelling.
+    """
+    out = []
+    for unit in prose_units(text):
+        for m in CLAIM.finditer(unit):
+            out.append((m.group(1), m.group(2), unit[max(0, m.start() - 40):m.end() + 40].strip()))
+    return out
+
+
+def claims_printed(live: str, number: str, noun: str) -> bool:
+    """Does some real run print that number within three words of that noun?
+
+    Checked against the corpus with its line structure kept (only the engine version folded
+    out), so a run's own wrapped summary still counts but two unrelated lines cannot be
+    stitched into a claim the tool never made.
+    """
+    return re.search(PRINTED % (re.escape(number), noun_pattern(noun)), live) is not None
+
+
+def corpus(lines: list[str]) -> str:
+    """A run corpus with the runner-dependent bit normalised and the line breaks kept."""
+    return "\n".join(ENGINE_VER.sub("capstone/", ln) for ln in lines)
+
+
+def board_of(md: Path, names: list[str]) -> str | None:
+    """Which sample directory a document is about, judged from its own filename.
+
+    README and the security note talk about every board, so they get the whole corpus; a case
+    study is scoped to the board it is a case study of, because a number that only some
+    *other* image prints is a stale quote rather than a passing claim.
+    """
+    stem = md.stem.lower()
+    hits = [n for n in names if n.lower() in stem]
+    return hits[0] if len(hits) == 1 else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--list", action="store_true", help="print each quote that was checked")
     a = ap.parse_args()
+
+    # a Windows console is a GBK console, and the reports this checker echoes contain
+    # `✓` and non-breaking spaces; failing to print a finding is not the same as having no
+    # finding, so let the undisplayable bytes escape rather than crash the gate
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
 
     images = sorted(p for p in (ROOT / "samples").glob("*/*")
                     if p.suffix in (".bin", ".elf") and p.is_file())
@@ -177,8 +389,13 @@ def main() -> int:
               "(the dependency-free CI job does not need this check)")
         return 0
 
-    findings, lines = run_all(images)
+    findings, lines, boards = run_all(images)
     live_text = norm("\n".join(lines))
+    # the same corpus with its lines intact, for prose claims: `norm` folds newlines away,
+    # which is right for matching a re-wrapped quote and wrong for deciding whether a run
+    # ever printed a number next to a noun
+    live_lines = corpus(lines)
+    board_corpora = {name: corpus(ls) for name, ls in boards.items()}
     # (kind, subject, conf@2dp) -> the summaries the tool printed for that triple
     live_pairs: dict[tuple[str, str, str], list[str]] = {}
     for line in lines:
@@ -267,6 +484,28 @@ def main() -> int:
                         f"{rel}: {len(run)} header lines quoted as one transcript, but no run "
                         f"prints them consecutively -- a line was dropped or taken from "
                         f"another image: {text[:80]}")
+
+    for md in DOCS:
+        rel = md.relative_to(ROOT)
+        name = board_of(md, sorted(board_corpora))
+        live = board_corpora[name] if name else live_lines
+        for num, noun, where in prose_claims(md.read_text(encoding="utf8")):
+            checked += 1
+            if a.list:
+                print(f"  claim  {rel}: {num} {noun}  << {where}")
+            if claims_printed(live, num, noun):
+                continue
+            # the same number printed by a *different* board is the failure mode this scoping
+            # exists to catch, so name the corpus that does have it rather than leave a mystery
+            elsewhere = [b for b, text in board_corpora.items()
+                         if text is not live and claims_printed(text, num, noun)]
+            hint = ""
+            if elsewhere:
+                who = " and ".join(elsewhere)
+                hint = (f" -- only {who} {'prints' if len(elsewhere) == 1 else 'print'} it, "
+                        f"and this is not a doc about {'it' if len(elsewhere) == 1 else 'them'}")
+            problems.append(f"{rel}: prose says {num} {noun}, but no run of the sample this "
+                            f"doc is about prints that{hint}: {where}")
 
     print(f"doc quotes: {len(findings)} findings from {len(images)} images, "
           f"{checked} quoted fragments/lines checked")

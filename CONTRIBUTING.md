@@ -25,7 +25,7 @@ Binary blobs in this repository would also make the verification claims unverifi
 because a reader cannot tell whether the file they checked against is the file the numbers
 came from.
 
-## The two rules that gate most changes
+## The three rules that gate most changes
 
 **1. A finding without anchored evidence does not exist.**  `src/firmprint/evidence.py`
 defines the contract: a claim above `STRICT_CONFIDENCE` must carry at least one evidence
@@ -48,11 +48,13 @@ package manager recognises.  Pin the *shape* of an engine label in tests, never 
 
 **3. A number quoted in prose must be a number the tool prints today.**  `README.md` and
 `docs/case-*.md` paste real report rows, and a heuristic fix silently makes one of them
-stale.  `python tools/check_doc_quotes.py` re-scans every fetched sample and checks each
-quoted row, each wrapped summary tail, and each `` ```json `` fragment against live output
-(JSON fragments must be a *subset* of a real finding, so the docs may elide but not invent).
-It runs in CI in the `verification` job, and it is the gate to run after any change that
-moves a count or a confidence:
+stale.  `python tools/check_doc_quotes.py` re-scans every fetched sample and checks three
+things: each quoted row, each wrapped summary tail and each `` ```json `` fragment against
+live output (JSON fragments must be a *subset* of a real finding, so the docs may elide but
+not invent); each multi-line header quote as a contiguous transcript; and every number in a
+*sentence* — outside the fenced blocks — that names a report quantity.  It runs in CI in the
+`verification` job, and it is the gate to run after any change that moves a count or a
+confidence:
 
 ```bash
 python tools/check_doc_quotes.py          # needs: python tools/get_sample.py --all
@@ -61,6 +63,21 @@ python tools/check_doc_quotes.py --list   # show every quote it checked
 
 Without `samples/` it prints a note and exits 0 — the dependency-free CI job has nothing to
 compare against, and the check is deliberately not a test of prose style.
+
+The corpus a sentence is checked against is **built from runs, never typed in**: the printed
+text of every scan, plus counts derived from the same report objects (findings per image,
+rows per kind, the `--no-code` pass, each map's exclusive/blind constants, the `verify`
+oracle score for an ELF), plus `socdb list`, plus the two documented limits the code owns —
+`cli.DEFAULT_MAX_FINDINGS` and `vectors.MAX_GAP`.  So "the scan stops after 24 consecutive
+unused slots" is a checked claim, and changing `MAX_GAP` without changing the prose fails.
+
+Two consequences for anyone writing docs here.  A number you invented for a rhetorical effect
+("it turns 40 unsupported references into 40 accesses") will fail, and the fix is to write the
+sentence without the digits — that is the whole point of the project.  And a case study is
+checked against *its own board's* runs, so a count copied from the other board fails with a
+message that says which one prints it.  (Scoping is per board, not per invocation: a claim
+that some run of this board — `.bin`, `.elf`, merged dump — prints N is accepted.  Quote the
+pass you mean and keep the number from that pass.)
 
 Multi-line header quotes are compared as *contiguous transcripts*, so a pasted block must
 keep every line the CLI printed in order.  A dropped line is stale even when every surviving

@@ -7,7 +7,7 @@ comparing nothing -- so the checker itself is pinned here, the same way the heur
 each test states a stale quote and asserts the tool notices.
 
 The end-to-end pass is opt-in (`FIRMPRINT_DOC_QUOTES=1`) because it re-scans all ten sample
-images twice; CI's `verification` job runs `tools/check_doc_quotes.py` directly, so the
+images three times; CI's `verification` job runs `tools/check_doc_quotes.py` directly, so the
 gate exists whether or not this test is enabled.
 """
 from __future__ import annotations
@@ -189,6 +189,89 @@ def test_a_json_fence_that_does_not_parse_is_still_classified_as_json(tmp_path):
     assert chk.quoted(md, want_json=False) == []
 
 
+# ------------------------------------------------------------------- the prose layer
+
+def test_a_claim_written_across_a_line_break_is_still_a_claim():
+    """Docs wrap at 80 columns; a number and its noun must not be separated by that choice.
+
+    The sentence and its paraphrase are the same assertion, and both have to be found -- a
+    checker that only sees the unwrapped one reports the wrapped one as an unchecked 0.
+    """
+    md = "addresses.  28\nfurther blocks were reported that the oracle has no name\n" \
+         "for (ETH, SDIO)."
+    folded = chk.prose_units(md)
+    assert folded == ["addresses. 28 further blocks were reported that the oracle has no "
+                      "name for (ETH, SDIO)."]
+    claims = chk.prose_claims(md)
+    assert [(n, w) for n, w, _c in claims] == [("28", "blocks")], claims
+    assert "28 further blocks" in claims[0][2]
+
+
+def test_a_table_row_is_not_folded_into_its_neighbouring_cell():
+    """A count in one cell must not become a claim about the word in the next column.
+
+    Folding whole blocks together turned every comparison table into invented assertions;
+    rows stay separate units, so each cell's number is only read against nouns in its own
+    cell.
+    """
+    units = chk.prose_units("| board | blocks | findings |\n|---|---|---|\n"
+                            "| OpenMV2 | 81 | 107 |\n\nthe prose continues here")
+    assert units[-1] == "the prose continues here"
+    assert "| OpenMV2 | 81 | 107 |" in units
+    # `81` is not a claim about `findings`, and `107` is not a claim about anything: what
+    # follows a cell's number is a pipe, and a noun has to be a word
+    assert chk.prose_claims("| OpenMV2 | 81 | 107 |") == []
+
+
+def test_prose_that_is_not_about_a_report_quantity_is_left_alone():
+    """`128 KB bootloader` and `Thumb-2 instructions` are facts about other things.
+
+    The noun list is what makes this check about the tool's own output; these are the
+    shapes that used to fire, and each is now a claim about nothing.
+    """
+    for text in ("OpenMV3 puts a 128 KB bootloader in front of the firmware.",
+                 "decoded Thumb-2 instructions (with capstone)",
+                 "UART (2). RTC's row is confirmed by carve alone",
+                 "Python 3.10 or newer is required."):
+        assert chk.prose_claims(text) == [], text
+
+
+def test_a_comma_grouped_count_is_not_read_as_its_first_three_digits():
+    """"202,041 instructions" is one number; "202 instructions" is a different claim.
+
+    Without the comma guards, the regex fell back to the three-digit prefix and then found
+    the noun two words later, so a table cell passed by accidentally matching a row of the
+    wrong image.
+    """
+    claims = chk.prose_claims("| OpenMV2 | `stm32f427xx` | 14/14 | 0 | 202,041 instructions "
+                              "decoded |")
+    assert claims == [("202,041", "instructions", claims[0][2])], claims
+    assert not any(n == "202" for n, _w, _c in claims)
+
+
+@pytest.mark.parametrize("noun, printed", [
+    ("tables", "2 table(s)"), ("accesses", "42 access(es)"), ("violations", "0 violation(s)"),
+    ("findings", "107 findings"), ("blocks", "81 blocks"), ("slots", "131 slots")])
+def test_the_cli_parenthetical_plural_is_the_same_claim_as_prose(noun, printed):
+    """`f"{n} table(s)"` and "2 vector tables" have to be comparable, or every row count in
+    the docs is checked against a spelling nobody prints."""
+    assert chk.claims_printed(printed, printed.split()[0], noun), printed
+
+
+def test_a_number_from_the_other_board_is_not_this_boards_answer():
+    """The point of scoping a case study to its own runs: a copied count must fail.
+
+    33 is a real number this tool prints -- for OpenMV3 -- which is exactly why a corpus of
+    every image lets the OpenMV2 doc quote it and pass.
+    """
+    live = "counts  openmv2/firmware.elf json: 28 blocks the driver oracle cannot name"
+    assert chk.claims_printed(live, "28", "blocks")
+    assert not chk.claims_printed(live, "29", "blocks")
+    assert not chk.claims_printed(live, "33", "blocks")
+    assert chk.board_of(chk.ROOT / "docs" / "case-openmv2.md", ["openmv2", "openmv3"]) == "openmv2"
+    assert chk.board_of(chk.ROOT / "README.md", ["openmv2", "openmv3"]) is None
+
+
 @contextlib.contextmanager
 def _clean_argv():
     """The checker reads argv; a test must not inherit pytest's."""
@@ -217,4 +300,4 @@ def test_the_repo_prose_passes_and_is_actually_checked(capsys):
     report = capsys.readouterr().out
     assert rc == 0, report
     n = int(re.search(r"(\d+) quoted fragments/lines checked", report).group(1))
-    assert n >= 20, f"the checker found only {n} quotes; its patterns are stale:\n{report}"
+    assert n >= 40, f"the checker found only {n} quotes; its patterns are stale:\n{report}"
