@@ -137,8 +137,8 @@ H7 a contender for both boards.
 ## 4. What the code touches, and what it is not
 
 ```
-peripheral.access  RCC     0.86  RCC: 264 decoded load/store(s) through a tracked base
-                                 register; DCKCFGR2/read=24, AHB1ENR/read=23, …
+peripheral.access  RCC     0.86  RCC: 265 decoded load/store(s) through a tracked base
+                                 register; DCKCFGR2/read=25, AHB1ENR/read=23, …
 peripheral.access  DMA1    0.86  DMA1: 26 decoded load/store(s) through a tracked base
                                  register; HIFCR/write=13, LIFCR/write=13
 peripheral.access  FLASH_R 0.86  FLASH_R: 62 decoded load/store(s) …; CR/read=21,

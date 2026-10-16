@@ -386,3 +386,46 @@ def test_without_capstone_the_engine_reports_nothing_and_says_why(soc, image, mo
     monkeypatch.setattr(decode, "CAPSTONE", None)
     findings, stats = decode.decode_code(image, soc)
     assert findings == [] and stats == {"engine": None}
+
+
+# ------------------------------------------------------------- counts and coverage
+
+def test_a_count_larger_than_the_evidence_list_is_still_reported_in_full(soc, image):
+    """The evidence cap used to leak into the number.
+
+    `_record` keeps at most 24 instruction records per (peripheral, register, direction),
+    and `_fold` summed those lists -- so a peripheral storing 30 times to one register
+    printed "24 decoded load/store(s)": `min(N, 24)` presented as an exact count.
+    """
+    insns = []
+    for k in range(30):
+        a = TEXT_BASE + k * 6
+        insns += [insn(a, "movw", f"r3, #0x{USART1 & 0xFFFF:04X}"),
+                  insn(a + 2, "movt", f"r3, #0x{USART1 >> 16:04X}"),
+                  insn(a + 4, "str", "r2, [r3, #0xc]")]
+    accesses, _imm, stats = sweep(insns, soc, image)
+    evs = accesses[("USART1", "CR1", "write")]
+    assert len(evs) == 24                                   # the list is capped on purpose
+    f, = decode._fold(accesses, {}, soc, image, stats)
+    assert f.metrics["accesses"] == 30 and f.summary.startswith("USART1: 30 decoded")
+    assert len(f.evidence) == 3                             # and the report says which is which
+    assert any("full total" in u for u in f.unknowns), f.unknowns
+
+
+def test_bytes_the_disassembler_rejected_are_not_counted_as_decoded(soc):
+    """`coverage` is what was turned into instructions, not what the window spanned.
+
+    `0xFFFF` is not a Thumb encoding: the walker resyncs past it.  Counting the window
+    length instead of the consumed bytes reported that halfword as decoded, so a reader
+    comparing `coverage` against the instruction count could not tell decoding from
+    scanning.
+    """
+    if not decode.available():
+        pytest.skip("needs the real disassembler")
+    body = b"\x00\xbf" * 8 + b"\xff\xff" + b"\x00\xbf" * 8      # 34 B, 32 B of them code
+    seg = Segment(TEXT_BASE, body, "text", ".text", "raw", 0)
+    img = Image("t", len(body), "raw", "arm", "little", None, [seg])
+    findings, stats = decode.decode_code(img, soc)
+    assert stats["resyncs"] >= 1
+    assert stats["bytes_decoded"] == 32 and stats["instructions"] == 16
+    assert stats["coverage"] == round(32 / 34, 4)

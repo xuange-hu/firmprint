@@ -94,7 +94,7 @@ one of them.
   from the capstone engine and quote instruction bytes.
 - register names resolve only where CMSIS gives the block a struct; an offset inside a
   struct hole reports as the block base rather than an invented register.
-- runtimes: ELF 1.37s, raw 1.37s, merged 1.9s (3.12.10 / windows).
+- runtimes: ELF 1.78s, raw 1.8s, merged 2.38s (3.12.10 / windows).
 
 ## Reproduce
 

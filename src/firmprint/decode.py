@@ -60,6 +60,14 @@ DEVICE_SPACE = (0x4000_0000, 0xDFFF_FFFF)
 #: how many unmapped device addresses a report names; the count stays exact
 _UNMAPPED_LIST_CAP = 24
 
+#: how many instruction records one (peripheral, register, direction) key keeps as evidence.
+#: A count is never taken from this list -- see `_TALLY`.
+_EVIDENCE_CAP = 24
+
+#: private key under which `_record` accumulates the true counts, removed from `stats`
+#: before the report is built so no internal field reaches a reader or the JSON schema.
+_TALLY = "_access_tally"
+
 _IMM_RE = re.compile(r"#\s*(-?0x[0-9a-fA-F]+|-?\d+)")
 _REG_RE = re.compile(r"\br(\d{1,2})\b")
 # capstone prints base registers as bare names ("pc", "sp", "lr", "r0"..,"r12"),
@@ -161,9 +169,18 @@ def decode_code(image: Image, soc: Soc, budget: int = DEFAULT_CODE_BUDGET,
     # table (data), not code.  Symbols give us real instruction boundaries and let
     # every finding name the function that produced it.
     windows = _function_windows(image, code_segs, limit, stats)
+    # One byte may only be counted once.  Adjacent symbols produce windows that overlap
+    # (`max(nxt - a, 2)` widens a two-byte function), and a window can end on bytes
+    # capstone never consumed, so adding `len(chunk)` per window double-counted the
+    # overlap and counted padding as decoded -- which is how `coverage` could print over
+    # 100%.  A per-segment byte map settles it: coverage is the union of what was actually
+    # turned into instructions.
+    covers = {id(s): bytearray(len(s.data)) for s in code_segs}
     for seg, start, length in windows:
-        _walk(cs, seg, start, length, soc, image, accesses, immediates, stats, unmapped, sites)
+        _walk(cs, seg, start, length, soc, image, accesses, immediates, stats, unmapped,
+              sites, covers[id(seg)])
 
+    stats["bytes_decoded"] = sum(sum(c) for c in covers.values())
     stats["coverage"] = round(decoded_total(stats) / max(total, 1), 4)
     ranked = sorted(unmapped, key=lambda a: (-unmapped[a], a))
     stats["unmapped_device_accesses"] = sum(unmapped.values())
@@ -172,6 +189,7 @@ def decode_code(image: Image, soc: Soc, budget: int = DEFAULT_CODE_BUDGET,
     # reader never mistakes "12 addresses" for "there were only 12"
     stats["unmapped_addresses"] = [f"0x{a:08X}" for a in ranked[:_UNMAPPED_LIST_CAP]]
     findings = _fold(accesses, immediates, soc, image, stats)
+    stats.pop(_TALLY, None)          # internal accumulator, never part of a report
     gap = _coverage_finding(soc, ranked, unmapped, sites, others or {}, stats)
     if gap:
         findings.append(gap)
@@ -256,7 +274,11 @@ def _function_windows(image: Image, code_segs, limit: int, stats: dict):
     for seg in code_segs:
         addrs = sorted(a for a in image.symbols if seg.vaddr <= a < seg.end)
         if not addrs:
-            windows.append((seg, 0, min(len(seg.data), budget)))
+            # A zero-length window decodes nothing, so do not record one: the budget
+            # really did mean "no instruction decoding".
+            length = min(len(seg.data), budget)
+            if length:
+                windows.append((seg, 0, length))
             stats["resyncs"] += 1
             continue
         for i, a in enumerate(addrs):
@@ -275,7 +297,8 @@ def _function_windows(image: Image, code_segs, limit: int, stats: dict):
 
 def _walk(cs, seg: Segment, start: int, length: int, soc: Soc, image: Image,
           accesses: dict, immediates: dict, stats: dict,
-          unmapped: Counter | None = None, sites: dict[int, Evidence] | None = None) -> None:
+          unmapped: Counter | None = None, sites: dict[int, Evidence] | None = None,
+          cover: bytearray | None = None) -> None:
     """Flow-insensitive immediate/register sweep across one function body."""
     state: dict[int, tuple[int, bool]] = {}       # reg -> (value, complete32)
     pc = (seg.vaddr + start) | 1
@@ -286,12 +309,17 @@ def _walk(cs, seg: Segment, start: int, length: int, soc: Soc, image: Image,
         for insn in cs.disasm(chunk[pos:], pc + pos):
             produced += 1
             stats["instructions"] += 1
+            if cover is not None:
+                cover[start + pos:start + pos + insn.size] = b"\x01" * insn.size
             _step(insn, soc, image, state, accesses, immediates, stats, unmapped, sites)
             pos += insn.size
         if not produced:
             pos += 2                                # resync: skip the bad halfword
             stats["resyncs"] += 1
-    stats["bytes_decoded"] += len(chunk)
+    if cover is None:
+        # standalone callers (tests) that pass no byte map still get a walk distance,
+        # measured in bytes actually consumed rather than in window length
+        stats["bytes_decoded"] += pos
 
 
 def _step(insn, soc: Soc, image: Image, state: dict, accesses: dict,
@@ -395,7 +423,13 @@ def _record(bucket: dict, soc: Soc, value: int, addr: int, image: Image,
         return
     reg = soc.register_name(periph, delta)
     key = (periph, reg, direction)
-    if len(bucket[key]) >= 24:
+    # The evidence list is capped, the count is not.  Without this tally a row that saw 40
+    # stores to one register printed "24 decoded load/store(s)" -- an exact-looking number
+    # that was really `min(N, 24)`, the failure mode the carve engine goes out of its way to
+    # avoid (carve.py keeps count and evidence separate for exactly this reason).
+    if stats is not None:
+        stats.setdefault(_TALLY, Counter())[(periph, reg, direction)] += 1
+    if len(bucket[key]) >= _EVIDENCE_CAP:
         return
     bucket[key].append(_instruction_evidence(soc, value, addr, image, mn, ops, direction, raw))
 
@@ -442,12 +476,18 @@ def _nearest_symbol(image: Image, addr: int) -> str | None:
 def _fold(accesses: dict, immediates: dict, soc: Soc, image: Image, stats: dict) -> list[Finding]:
     out: list[Finding] = []
     per: dict[str, dict] = {}
+    tally = stats.get(_TALLY) or {}
     for (periph, reg, direction), evs in accesses.items():
-        entry = per.setdefault(periph, {"accesses": 0, "regs": defaultdict(int), "ev": []})
-        entry["accesses"] += len(evs)
+        # the tally is the truth; `evs` is at most `_EVIDENCE_CAP` records of it
+        n = tally.get((periph, reg, direction), len(evs))
+        entry = per.setdefault(periph, {"accesses": 0, "regs": defaultdict(int), "ev": [],
+                                        "capped": False})
+        entry["accesses"] += n
         entry["regs"][(reg or "(block base)", direction)] = \
-            entry["regs"][(reg or "(block base)", direction)] + len(evs)
+            entry["regs"][(reg or "(block base)", direction)] + n
         entry["ev"].extend(evs[:3])
+        if n > len(evs):
+            entry["capped"] = True
     for pname, entry in sorted(per.items(), key=lambda kv: -kv[1]["accesses"]):
         top = sorted(entry["regs"].items(), key=lambda kv: -kv[1])[:8]
         f = Finding(
@@ -463,13 +503,15 @@ def _fold(accesses: dict, immediates: dict, soc: Soc, image: Image, stats: dict)
                 "base-register tracking resets at function boundaries, so a base held across a "
                 "branch is counted as unknown rather than guessed",
                 "offsets are static; index registers and peripheral aliases are not resolved",
-            ],
+            ] + ([f"the count is the full total; evidence records for one register and "
+                  f"direction stop after {_EVIDENCE_CAP} sites"] if entry["capped"] else []),
             metrics={"accesses": entry["accesses"],
                      "registers": {f"{r}/{d}": n for (r, d), n in top}},
         )
         out.append(f)
 
-    imm_total = sum(len(v) for v in immediates.values())
+    imm_total = sum(tally.get(k, len(v)) for k, v in immediates.items())
+    imm_capped = any(tally.get(k, 0) > len(v) for k, v in immediates.items())
     if imm_total:
         names = sorted({k[0] for k in immediates})
         sample = [e for v in list(immediates.values())[:4] for e in v[:1]]
@@ -483,7 +525,9 @@ def _fold(accesses: dict, immediates: dict, soc: Soc, image: Image, stats: dict)
             rule="peripheral.materialised.immediate",
             evidence=sample,
             unknowns=["MOVW/MOVT only gives the low 16 bits until the MOVT half is seen; "
-                      "partial pairs are reported as block membership, not register access"],
+                      "partial pairs are reported as block membership, not register access"]
+                     + ([f"the site count is the full total; evidence records stop after "
+                         f"{_EVIDENCE_CAP} sites per key"] if imm_capped else []),
             metrics={"sites": imm_total, "peripherals": names,
                      "decode_coverage": stats["coverage"], "instructions": stats["instructions"]},
         )
