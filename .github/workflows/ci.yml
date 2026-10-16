@@ -15,6 +15,14 @@ jobs:
     # capstone, because that is the install a forensics box actually gets.
     name: py${{ matrix.python }} / ${{ matrix.os }} / capstone=${{ matrix.capstone }}
     runs-on: ${{ matrix.os }}
+    # Without this, a `run:` block on windows-latest is PowerShell, and PowerShell does
+    # not stop a script when a command in the middle of it fails -- it keeps going and
+    # the step's exit code is whatever the *last* line returned.  That turns every check
+    # before the last line into a check that can fail silently, which is the one thing a
+    # gate must not do.  bash is the shell that aborts (`-e`), on all three platforms.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -59,10 +67,13 @@ jobs:
       - name: Stdlib scan must still answer on a synthetic image
         # `tools/make_synthetic.py` is the same file a reader uses before downloading a
         # sample, so this job proves the dependency-free path works without a network.
+        # The report goes to disk through `--json`, not a shell redirect: the CLI writes it
+        # as UTF-8 explicitly, whereas `>` hands the bytes to whatever the runner's stdout
+        # encoding happens to be, and then the reader has to guess.
         run: |
           python tools/make_synthetic.py blob.bin --print-summary
-          python -m firmprint scan blob.bin --no-code --format json > out.json
-          python -c "import json;d=json.load(open('out.json'));assert d['contract']['violations']==0,d['contract']"
+          python -m firmprint scan blob.bin --no-code --json out.json
+          python -c "import json;c=json.load(open('out.json',encoding='utf-8'))['contract'];assert not c['violations'],c"
           python -m firmprint scan blob.bin --no-code --strict
 
   verification:
