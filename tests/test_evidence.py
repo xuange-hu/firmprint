@@ -8,12 +8,16 @@ loosened — a contract nobody can test is a contract that quietly decays.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from firmprint.evidence import (
     SCHEMA,
     STRICT_CONFIDENCE,
     Evidence,
     Finding,
+    dumps,
     iter_numbered,
     render_json,
     sha256_file,
@@ -159,6 +163,21 @@ def test_render_json_produces_parseable_output_with_a_trailing_newline():
 
 def test_render_json_survives_the_types_the_report_actually_uses():
     assert "1" in render_json({"n": 1, "b": b"x".hex(), "p": None, "t": (1, 2)})
+
+
+def test_dumps_refuses_to_stringify_what_it_cannot_represent():
+    """`default=str` used to turn a leaked object into a plausible string.
+
+    A set became `"{'GPIOA', 'TIM2'}"` and a Path became a quoted filesystem string, so
+    a consumer could not tell a list of blocks from a sentence about them.  Refusing is
+    the honest failure: the producer has to decide the type.
+    """
+
+    for leaked in ({"GPIOA", "TIM2"}, Path(__file__), b"\x00\x01"):
+        with pytest.raises(TypeError) as exc:
+            dumps({"x": leaked})
+        assert type(leaked).__name__ in str(exc.value), str(exc.value)
+    assert dumps({"ok": 1}, indent=None) == '{"ok": 1}'
 
 
 def test_sha256_is_the_digest_of_the_bytes_whether_they_come_from_disk_or_memory(tmp_path):

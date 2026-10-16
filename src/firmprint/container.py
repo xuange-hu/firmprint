@@ -86,6 +86,11 @@ class Image:
     segments: list[Segment] = field(default_factory=list)
     symbols: dict[int, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    #: the bytes this image was parsed from, when a caller handed them over.
+    #: It exists so one file read can serve the hash, the segments and the oracle
+    #: instead of three; `to_dict` never serialises it, and `repr=False` keeps a
+    #: debugger from printing a megabyte of firmware.
+    raw: bytes | None = field(default=None, repr=False)
 
     def find(self, vaddr: int) -> Segment | None:
         for s in self.segments:
@@ -112,9 +117,23 @@ class Image:
 # --------------------------------------------------------------------------- ELF
 
 def load_elf(raw: bytes, path: str) -> Image:
+    # Everything below reads the header at fixed offsets, so the length is checked here
+    # instead of letting `raw[4]` raise IndexError and `unpack_from` raise struct.error.
+    # Neither of those is a ValueError, so neither was caught by the CLI's usage-error
+    # handler: a four-byte file that began `\x7fELF` used to end a scan with a traceback
+    # instead of with a sentence about what is missing.
+    if len(raw) < 16:
+        raise ValueError(f"truncated ELF: {len(raw)} byte(s), the identification block "
+                         f"alone needs 16")
     is64 = raw[4] == 2
     endian = "little" if raw[5] == 1 else "big"
     p = "<" if endian == "little" else ">"
+    # The widest field read below is `e_shentsize/e_shnum/e_shstrndx`: three halfwords at
+    # offset 58 for ELF64 (so 64 bytes) and at 46 for ELF32 (so 52).
+    need = 64 if is64 else 52
+    if len(raw) < need:
+        raise ValueError(f"truncated ELF{64 if is64 else 32} header: {len(raw)} byte(s) "
+                         f"in the file, the fields this tool reads need {need}")
     # Elf32_Ehdr: ident16 type18 machine... version20 entry24 phoff28 shoff32
     #              flags36 ehsize40 phentsize42 phnum44 shentsize46 shnum48 shstrndx50
     # Elf64_Ehdr: ... flags48(half at 52) ehsize52 phentsize54 phnum56 shentsize58
@@ -421,7 +440,18 @@ def load_raw(data: bytes, path: str, base: int | None = None) -> Image:
         (0, 0, 0, {}) if base is not None else guess_load_base(data)
     chosen = base if base is not None else (guessed or 0)
     notes = []
-    if base is None:
+    if base is None and not score:
+        # Nothing earned this address.  The sentence used to read like the reasoned one --
+        # "inferred as 0x00000000: of the 12 origins tested it is the one whose best
+        # candidate reads most like a vector table (0 table(s) there)" -- which dresses a
+        # null result up as a choice and invites a reader to trust an address the image
+        # never supported.
+        notes.append(
+            f"raw dump: no container header, and no vector table at any of the "
+            f"{len(counts) or 1} origins tested. load base shown as 0x{chosen:08X} because "
+            f"a scan needs one, not because this image supports it -- the address carries "
+            f"no evidence. Pass --base to pin it, or treat this file as not a Cortex-M image.")
+    elif base is None:
         rivals = sorted((b, n) for b, n in counts.items() if b != chosen and n)
         notes.append(
             f"raw dump: no container header. load base inferred as 0x{chosen:08X}: "
@@ -489,7 +519,19 @@ def _merge(chunks: dict[int, tuple], source: str) -> list[Segment]:
 def load(path: str, base: int | None = None, arch: str | None = None) -> Image:
     """Open any supported container.  Falls through wrappers before giving up."""
     with open(path, "rb") as fh:
-        raw = fh.read()
+        return load_bytes(fh.read(), path, base=base, arch=arch)
+
+
+def load_bytes(raw: bytes, path: str, base: int | None = None,
+               arch: str | None = None) -> Image:
+    """Open a container from bytes already in hand.
+
+    Split out of `load()` because the pipeline needs the same bytes three times
+    (the sha256, the segments, the symbol oracle) and reading a several-megabyte
+    firmware per use was both slow and a consistency hazard: a file rewritten
+    between reads produced a report whose hash did not describe its own findings.
+    The image keeps the buffer it came from so downstream stages can reuse it.
+    """
     notes: list[str] = []
     if raw[:4] == b"\x7fELF":
         img = load_elf(raw, path)
@@ -525,6 +567,7 @@ def load(path: str, base: int | None = None, arch: str | None = None) -> Image:
     if not img.segments:
         raise ValueError(f"{path}: no loadable segments found")
     img.segments.sort(key=lambda s: s.vaddr)
+    img.raw = raw
     return img
 
 

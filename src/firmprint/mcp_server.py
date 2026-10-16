@@ -22,14 +22,18 @@ from typing import Any, TextIO
 
 from . import __version__
 from .analyze import SCHEMA, analyze, to_markdown
+from .decode import DEFAULT_CODE_BUDGET
+from .evidence import dumps
 from .socdb import DATA_DIR, available, load_soc
-from .verify import compare, symbol_oracle
+from .verify import run_verification
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "firmprint"
 
-#: capstone decoding is the slow part; an agent loop should not inherit it by accident
-DEFAULT_BUDGET = 0x8_0000
+#: capstone decoding is the slow part; an agent loop should not inherit it by accident.
+#: This is the engine's own default, not a second copy of it -- two numbers for one
+#: concept drift apart the moment either is tuned.
+DEFAULT_BUDGET = DEFAULT_CODE_BUDGET
 
 TOOLS: list[dict] = [
     {
@@ -148,18 +152,22 @@ def _tool(name: str | None, args: dict) -> dict:
         payload = _verify(args["path"], args.get("soc"), bool(args.get("full")))
     else:
         payload = _scan(args)
-    text = payload if isinstance(payload, str) else json.dumps(payload, indent=1, default=str)
+    text = payload if isinstance(payload, str) else dumps(payload, indent=1)
     return {"content": [{"type": "text", "text": text}], "isError": False}
 
 
 def _scan(args: dict) -> Any:
+    # `or DEFAULT` would answer an explicit `budget: 0` or `max_findings: 0` with the
+    # default instead of the request.  Both are advertised in the tool schema, so silently
+    # replacing one is a wrong answer, not a convenience.
+    budget = args.get("budget")
     report = analyze(args["path"], soc_name=args.get("soc"),
                      base=_as_int(args.get("base")), data_dir=DATA_DIR,
-                     budget=args.get("budget") or DEFAULT_BUDGET,
+                     budget=DEFAULT_BUDGET if budget is None else int(budget),
                      full=bool(args.get("full")), skip_code=bool(args.get("no_code")))
     if args.get("format") == "markdown":
         return to_markdown(report)
-    if args.get("max_findings"):
+    if args.get("max_findings") is not None:
         n = int(args["max_findings"])
         report = {**report, "findings": report["findings"][:n],
                   "meta": {**report["meta"], "findings_truncated_to": n}}
@@ -167,12 +175,8 @@ def _scan(args: dict) -> Any:
 
 
 def _verify(path: str, soc: str | None, full: bool) -> dict:
-    report = analyze(path, soc_name=soc, full=full)
-    from .container import load
-    symbols = load(path).symbols
-    modules, samples = symbol_oracle(symbols)
-    result = compare(report, modules)
-    result["symbol_count"] = len(symbols)
+    report, result, samples = run_verification(path, soc=soc, data_dir=DATA_DIR, full=full)
+    result["symbol_count"] = report["meta"]["container"]["symbol_count"]
     result["oracle_sample_symbols"] = samples
     result["contract_violations"] = report["contract"]["violations"]
     return result
@@ -246,14 +250,27 @@ def serve(stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
         reply = dispatch(msg)
         if reply is None:
             continue
-        stdout.write(json.dumps(reply, default=str) + "\n")
+        try:
+            line = dumps(reply, indent=None)
+        except TypeError as exc:
+            # A reply this server cannot serialize is our bug, not the client's error, and
+            # it must not end the session: an uncaught exception here used to kill stdio
+            # mid-stream, leaving the caller with a closed pipe and no reason.  Report the
+            # leaked type on stderr and answer the same request id with an error frame.
+            sys.stderr.write(f"firmprint-mcp: {exc}\n")
+            line = json.dumps({"jsonrpc": "2.0", "id": reply.get("id"),
+                               "error": {"code": -32603,
+                                        "message": f"reply is not serialisable: {exc}"}})
+        stdout.write(line + "\n")
         stdout.flush()
         n += 1
     return n
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = argv or sys.argv[1:]
+    # `argv or sys.argv[1:]` turns an intentional empty list into the *caller's* command
+    # line, so `main([])` inherited flags it was never given.
+    args = sys.argv[1:] if argv is None else argv
     if "--self-test" in args:
         return _self_test()
     try:
@@ -264,6 +281,21 @@ def main(argv: list[str] | None = None) -> int:
     serve()
     sys.stderr.write("firmprint mcp: stdin closed\n")
     return 0
+
+
+def _require(condition, what) -> None:
+    """Check that survives `python -O`.
+
+    Bare `assert` was the old form, and an optimized interpreter strips every one of
+    them: the self-test then ran the server, checked nothing, printed "self-test ok"
+    and exited 0 -- a CI gate that switches itself off with an interpreter flag.
+    """
+    if not condition:
+        raise _SelfTestFailure(what)
+
+
+class _SelfTestFailure(Exception):
+    """One expectation of the protocol round-trip did not hold."""
 
 
 def _self_test() -> int:
@@ -298,18 +330,36 @@ def _self_test() -> int:
     out = Out()
     # The fixture feeds `"this is not json"` on purpose, so the "skipping unparsable
     # line" note on stderr is the pass condition, not a warning: a server that died on
-    # garbage would fail the `wrote == 6` assert below instead.
+    # garbage would fail the reply count below instead.
     sys.stderr.write("firmprint mcp: self-test fixture includes one unparsable line\n")
-    wrote = serve(io.StringIO("\n".join(lines) + "\n"), out)
-    by_id = {r["id"]: r for r in out.rows}
-    assert wrote == 6 and len(out.rows) == 6, (wrote, len(out.rows))
-    assert by_id[1]["result"]["serverInfo"]["name"] == SERVER_NAME
-    assert len(by_id[2]["result"]["tools"]) == len(TOOLS)
-    show = json.loads(by_id[3]["result"]["content"][0]["text"])
-    assert show["block"] == "USART1" and show["register"] == "CR1", show
-    assert by_id[4]["result"]["content"][0]["text"].lstrip().startswith("[")
-    assert by_id[5]["error"]["code"] == -32601, by_id[5]
-    assert by_id[6]["error"]["code"] == -32603 and "does-not-exist" in by_id[6]["error"]["message"]
+    try:
+        wrote = serve(io.StringIO("\n".join(lines) + "\n"), out)
+        by_id = {r["id"]: r for r in out.rows}
+        _require(wrote == 6 and len(out.rows) == 6, f"expected 6 replies, got {wrote}")
+        _require(by_id[1]["result"]["serverInfo"]["name"] == SERVER_NAME,
+                 "initialize did not name this server")
+        _require(len(by_id[2]["result"]["tools"]) == len(TOOLS),
+                 "tools/list returned a different number of tools than TOOLS")
+        show = json.loads(by_id[3]["result"]["content"][0]["text"])
+        _require(show["block"] == "USART1" and show["register"] == "CR1",
+                 f"0x4001100C is not USART1/CR1 in the shipped map: {show}")
+        _require(by_id[4]["result"]["content"][0]["text"].lstrip().startswith("["),
+                 "socdb list did not answer with a JSON array")
+        _require(by_id[5]["error"]["code"] == -32601,
+                 f"unknown method should be -32601, got {by_id[5]}")
+        _require(by_id[6]["error"]["code"] == -32603 and "does-not-exist" in
+                 by_id[6]["error"]["message"],
+                 f"a missing file should be an internal error naming it, got {by_id[6]}")
+    except _SelfTestFailure as bad:
+        sys.stderr.write(f"mcp self-test FAILED: {bad}\n")
+        return 1
+    except (KeyError, IndexError, TypeError, ValueError) as bad:
+        # A missing key means the reply shape changed, which is exactly what this test
+        # exists to catch; report it as a failed self-test (rc 1) rather than letting a
+        # traceback decide the exit code.
+        sys.stderr.write(f"mcp self-test FAILED: unexpected reply shape: "
+                         f"{type(bad).__name__}: {bad}\n")
+        return 1
     print(f"mcp self-test ok: {len(TOOLS)} tools, {wrote} replies, "
           f"protocol {PROTOCOL_VERSION}")
     return 0

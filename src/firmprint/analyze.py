@@ -26,10 +26,20 @@ def _soc_for_words(image, socs: dict[str, Soc], exclude) -> dict[str, dict]:
 
 def analyze(path: str, soc_name: str | None = None, base: int | None = None,
             data_dir: Path | None = None, budget: int | None = None, full: bool = False,
-            skip_code: bool = False) -> dict:
+            skip_code: bool = False, image: container.Image | None = None) -> dict:
+    """Scan one firmware image.
+
+    `image` lets a caller that already opened the file hand it over (that is what
+    `verify` does, because it needs the symbol table too).  The bytes the hash
+    covers are then exactly the bytes the findings came from.
+    """
     t0 = time.time()
-    raw = Path(path).read_bytes()
-    image = container.load(path, base=base)
+    if image is None:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        image = container.load_bytes(raw, path, base=base)
+    else:
+        raw = image.raw if image.raw is not None else Path(path).read_bytes()
 
     tables = vectors.scan_tables(image)
     best_table = max(tables, key=lambda f: f.confidence) if tables else None
@@ -37,7 +47,14 @@ def analyze(path: str, soc_name: str | None = None, base: int | None = None,
     socs = {soc_name: load_soc((data_dir or Path(__file__).with_name("data")) / f"{soc_name}.json")} \
         if soc_name else _load_all(data_dir)
     if not socs:
-        raise SystemExit("no SoC databases found — run: firmprint socdb list / firmprint socdb add")
+        # ValueError, not SystemExit: the CLI turns a ValueError into a one-line usage
+        # error, but `SystemExit` slips past `except Exception`, so the MCP server used to
+        # die mid-session on a box with no installed database instead of answering with a
+        # JSON-RPC error.  And the command it named did not exist -- `socdb` only has
+        # `list`/`show`; generating a database is the top-level `build`.
+        raise ValueError("no SoC databases found -- `firmprint socdb list` to see what is "
+                         "installed, `firmprint build --header <file> --family <f> "
+                         "--device <d>` to add one")
 
     exclude = [(s.vaddr, s.end) for s in image.segments]        # literal pointers into the image
     explained = _soc_for_words(image, socs, exclude)
@@ -78,7 +95,10 @@ def analyze(path: str, soc_name: str | None = None, base: int | None = None,
             "python": f"{platform.python_version()} / {platform.system().lower()}",
             "file": {"path": str(path), "size": len(raw), "sha256": evidence.sha256_file(raw)},
             "container": image.to_dict(),
-            "soc": chosen.summary(),
+            # `chosen` also names the carve engine's peripherals, so it is never absent --
+            # but presenting it as *the part* when no map earned a ranking is how a one-byte
+            # file reported `soc.device = stm32f427xx` while the text table said `match none`.
+            "soc": chosen.summary() if (soc_name in socs or ranked) else None,
             "soc_scan": {"databases_considered": sorted(socs),
                          "per_database": {k: {"blocks": len(v["blocks"]),
                                               "device_constants": len(v["addrs"])}
@@ -96,8 +116,12 @@ def analyze(path: str, soc_name: str | None = None, base: int | None = None,
 
 
 def _with_decode(findings, image, chosen, budget, full, socs):
-    extra, stats = decode.decode_code(image, chosen, budget=budget or decode.DEFAULT_CODE_BUDGET,
-                                      full=full, others=socs)
+    # `budget or DEFAULT` would answer an explicit "decode nothing" (0) with the default
+    # 512 KB, so only None means "caller did not choose".
+    extra, stats = decode.decode_code(
+        image, chosen,
+        budget=decode.DEFAULT_CODE_BUDGET if budget is None else budget,
+        full=full, others=socs)
     merged = findings + extra
     return merged, stats
 
@@ -115,9 +139,17 @@ def to_markdown(report: dict) -> str:
     lines.append(f"- container: **{meta['container']['format']}**, arch {meta['container']['arch']}, "
                  f"{len(meta['container']['segments'])} segment(s)")
     soc = meta["soc"]
-    lines.append(f"- matched SoC: **{soc['device']}** ({soc['family']}, {soc['core']}), "
-                 f"{soc['peripherals']} mapped peripherals, db from "
-                 f"{soc['provenance']['source_repo']}@`{str(soc['provenance']['header_sha256'])[:12]}`")
+    if soc:
+        lines.append(f"- matched SoC: **{soc['device']}** ({soc['family']}, {soc['core']}), "
+                     f"{soc['peripherals']} mapped peripherals, db from "
+                     f"{soc['provenance']['source_repo']}@`{str(soc['provenance']['header_sha256'])[:12]}`")
+    else:
+        # `chosen` still named the peripherals below -- that is a naming convention
+        # borrowed from whichever database the engine had to pick, not a claim about this
+        # image, and the report has to say which of the two it is looking at.
+        lines.append("- matched SoC: **none** — no installed map was distinguishable on the "
+                     "evidence in this image, so no part is claimed; peripheral names below "
+                     "come from whichever database the carve engine had to work against")
     lines.append(f"- engines: {', '.join(v for v in meta['engines'].values() if v)}")
     if meta["decode"].get("engine") is None:
         reason = {"absent": "capstone not installed",

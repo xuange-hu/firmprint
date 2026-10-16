@@ -18,12 +18,12 @@ Honest limits, stated in the report too:
 """
 from __future__ import annotations
 
-import json
 import re
 from collections import Counter
 from pathlib import Path
 
 from .analyze import analyze
+from .evidence import dumps
 
 #: HAL/LL module token -> CMSIS peripheral block-name prefixes (stm32f4/stm32h7)
 MODULE_TO_BLOCKS: dict[str, tuple[str, ...]] = {
@@ -139,21 +139,36 @@ def compare(report: dict, modules: dict[str, int]) -> dict:
 
 
 def cmd_verify(a) -> int:
-    report = analyze(a.file, soc_name=a.soc, data_dir=Path(a.data_dir) if a.data_dir else None,
-                     budget=a.budget, full=a.full)
-    image_mods, samples = symbol_oracle(_symbols_of(a.file))
-    result = compare(report, image_mods)
+    report, result, samples = run_verification(
+        a.file, soc=a.soc, base=a.base,
+        data_dir=Path(a.data_dir) if a.data_dir else None,
+        budget=a.budget, full=a.full)
     print(_render(report, result, samples, a.file))
     if a.json:
-        Path(a.json).write_text(json.dumps({"meta": report["meta"], "verify": result},
-                                           indent=2, default=str) + "\n", encoding="utf8")
+        Path(a.json).write_text(dumps({"meta": report["meta"], "verify": result}) + "\n",
+                                encoding="utf8")
         print(f"wrote {a.json}")
-    return 0
+    # Same rule as `scan`: the violation list is always computed, `--strict` decides
+    # whether it also fails the run.  Without the option here, a pipeline could gate on
+    # a scan but not on the verification that scores it.
+    return 1 if report["contract"]["violations"] and a.strict else 0
 
 
-def _symbols_of(path: str) -> dict[int, str]:
+def run_verification(path: str, soc: str | None = None, base: int | None = None,
+                     data_dir: Path | None = None, budget: int | None = None,
+                     full: bool = False) -> tuple[dict, dict, dict]:
+    """(report, comparison, symbol samples) built from one read of the file.
+
+    Opening the image once is not a micro-optimisation: the oracle has to be built
+    from the same bytes the findings came from, or a file that changed mid-run
+    would be scored against somebody else's answer key.
+    """
     from .container import load
-    return load(path).symbols
+    image = load(path, base=base)
+    report = analyze(path, soc_name=soc, data_dir=data_dir, budget=budget, full=full,
+                     image=image)
+    modules, samples = symbol_oracle(image.symbols)
+    return report, compare(report, modules), samples
 
 
 def _render(report: dict, r: dict, samples: dict[str, list[str]], path: str) -> str:
@@ -161,7 +176,8 @@ def _render(report: dict, r: dict, samples: dict[str, list[str]], path: str) -> 
     decoded = meta["decode"].get("instructions") or 0
     out = [f"# verification: {Path(path).name}", "",
            f"- image sha256 `{meta['file']['sha256']}`",
-           f"- matched part **{meta['soc']['device']}**; {r['detected_peripherals']} peripheral "
+           f"- matched part **{(meta['soc'] or {}).get('device', 'none (no map distinguished)')}**; "
+           f"{r['detected_peripherals']} peripheral "
            f"block(s) with address evidence; {decoded:,} instructions decoded",
            f"- oracle: {r['oracle_modules']} driver module(s) named by the image's own symbols",
            ]
@@ -203,6 +219,5 @@ def _render(report: dict, r: dict, samples: dict[str, list[str]], path: str) -> 
 def verify_markdown(path: str, soc: str | None = None, budget: int | None = None,
                     full: bool = False) -> str:
     """Library entry point used by tools/make_verification.py and the test suite."""
-    report = analyze(path, soc_name=soc, budget=budget, full=full)
-    modules, samples = symbol_oracle(_symbols_of(path))
-    return _render(report, compare(report, modules), samples, path)
+    report, result, samples = run_verification(path, soc=soc, budget=budget, full=full)
+    return _render(report, result, samples, path)

@@ -218,3 +218,33 @@ def test_serve_writes_one_reply_per_request_and_counts_them():
 
 def test_the_bundled_self_test_passes():
     assert mcp.main(["--self-test"]) == 0
+
+
+# ------------------------------------------------------------- arguments that are zero
+
+def test_max_findings_zero_is_a_request_not_an_absence(tmp_path):
+    """`if args.get("max_findings")` treated 0 as "not given" and returned every row.
+
+    A caller asking for no rows -- to keep a reply inside a context window -- must get no
+    rows, and the reply has to say it was truncated instead of looking like the image
+    held nothing.
+    """
+    p = tmp_path / "img.bin"
+    p.write_bytes(cortex_m_image())
+    report = payload(tool("firmprint_scan", {"path": str(p), "no_code": True,
+                                             "max_findings": 0}))
+    assert report["findings"] == []
+    assert report["meta"]["findings_truncated_to"] == 0
+
+
+@pytest.mark.skipif(not __import__("firmprint.decode", fromlist=["available"]).available(),
+                    reason="needs the real disassembler")
+def test_a_budget_of_zero_decodes_nothing_instead_of_defaulting(tmp_path):
+    """`budget or DEFAULT_BUDGET` silently answered `budget: 0` with the default 256 KB."""
+    from firmprint.decode import available as decode_available
+    assert decode_available()
+    p = tmp_path / "img.bin"
+    p.write_bytes(cortex_m_image())
+    report = payload(tool("firmprint_scan", {"path": str(p), "budget": 0}))
+    assert report["meta"]["decode"]["bytes_decoded"] == 0
+    assert report["meta"]["decode"]["instructions"] == 0

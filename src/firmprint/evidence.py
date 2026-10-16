@@ -5,8 +5,10 @@ claim without reproducible bytes is not a finding.  Every Finding carries the
 file offset, virtual address and raw bytes that produced it, plus an explicit
 list of what the analysis could *not* establish.
 
-`validate()` is fail-closed: a high-confidence claim with no evidence is an
-error, not a warning.  Flip it off with --no-strict only if you know why.
+`validate()` is fail-closed: a high-confidence claim with no evidence is a violation
+recorded in every report, not a warning.  There is no way to switch it off -- `--strict`
+only decides whether a violation also sets the exit code, so that a pipeline can fail
+instead of a human having to remember to read the `contract` line.
 """
 from __future__ import annotations
 
@@ -119,7 +121,29 @@ def validate(findings: Iterable[Finding]) -> list[str]:
 
 
 def render_json(report: dict) -> str:
-    return json.dumps(report, indent=2, sort_keys=False, default=str) + "\n"
+    return dumps(report) + "\n"
+
+
+def dumps(obj: object, indent: int | None = 2) -> str:
+    """Serialize a report or payload without inventing types for it.
+
+    Every place that turns analysis output into text goes through here, so "what a
+    report is allowed to contain" has one definition.
+
+    The old call was `json.dumps(..., default=str)`, which quietly turned anything
+    that is not JSON-native -- a `set`, a `Path`, `bytes` -- into a string.  A reader
+    then could not tell `["GPIOA"]` from `"{'GPIOA'}"`, and a report that mislabels
+    its own evidence is worse than one that admits it cannot say.  Producers are
+    JSON-native by construction (sample scans, MCP payloads and the test suite all
+    serialize with nothing to coerce), so an object that does not convert is a bug in
+    a producer: raise and name it instead of hiding it.
+    """
+    return json.dumps(obj, indent=indent, sort_keys=False, default=_no_coercion)
+
+
+def _no_coercion(obj):
+    raise TypeError(f"not JSON-serialisable: {type(obj).__name__} "
+                    f"{obj!r} -- convert it where the report is built")
 
 
 def iter_numbered(findings: Iterable[Finding]):

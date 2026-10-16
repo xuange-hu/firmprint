@@ -5,7 +5,7 @@
     firmprint scan app.hex --json report.json --md report.md
     firmprint mcp                          # serve the same analysis over stdio (MCP)
     firmprint socdb list
-    firmprint socdb build --header stm32h7a3xx.h --family h7 --device stm32h7a3xx
+    firmprint build --header stm32h7a3xx.h --family h7 --device stm32h7a3xx
     firmprint verify firmware.elf          # binary findings vs. ELF symbol truth
 
 Text output is the default; `--json`/`--md` write files so a report can be
@@ -14,13 +14,14 @@ attached to an issue or diffed between runs.
 from __future__ import annotations
 
 import argparse
-import json
+import struct
 import sys
 import textwrap
 from pathlib import Path
 
 from . import __version__
 from .analyze import SCHEMA, analyze, to_markdown
+from .evidence import dumps, render_json
 from .socdb import DATA_DIR, available, load_soc
 
 # How many rows the text table shows before it says "... N more finding(s)".  This is a
@@ -34,9 +35,22 @@ def _num(text: str) -> int:
     return int(text, 16) if text.lower().startswith(("0x", "-0x")) else int(text)
 
 
+def _clip(value: str, width: int) -> str:
+    """Fit `value` in `width` columns, and say so when it did not fit.
+
+    The table used to do `value[:width - 1]`, which produced rows like
+    `0 high-entropy bloc` -- a subject whose real name is `0 high-entropy block`, cut at a
+    character nobody chose.  A reader cannot tell that apart from a label the tool actually
+    uses, and a report whose own labels are silently wrong is exactly the kind of report this
+    tool exists to refuse.  The ellipsis costs one column and makes the cut visible.
+    """
+    value = str(value)
+    return value if len(value) <= width else value[:width - 1] + "…"
+
+
 def _emit_console(report: dict, fmt: str, max_findings: int) -> None:
     if fmt == "json":
-        print(json.dumps(report, indent=2, default=str))
+        print(dumps(report))
         return
     text = to_markdown(report) if fmt == "md" else _short(report, max_findings)
     sys.stdout.write(text)
@@ -94,8 +108,8 @@ def _short(report: dict, max_findings: int) -> str:
     out.append(f"{'kind':<24}{'subject':<20}{'conf':>5}  summary")
     out.append("-" * 100)
     for f in report["findings"][:max_findings]:
-        out.append(f"{f['kind']:<24}{str(f['subject'])[:19]:<20}{f['confidence']:>5.2f}  "
-                   f"{f['summary'][:96]}")
+        out.append(f"{_clip(f['kind'], 23):<24}{_clip(f['subject'], 19):<20}"
+                   f"{f['confidence']:>5.2f}  {_clip(f['summary'], 96)}")
     left = len(report["findings"]) - max_findings
     if left > 0:
         out.append(f"... {left} more finding(s): use --max-findings or --json")
@@ -110,7 +124,7 @@ def cmd_scan(a: argparse.Namespace) -> int:
                      budget=a.budget, full=a.full, skip_code=a.no_code)
     _emit_console(report, a.format, a.max_findings)
     if a.json:
-        Path(a.json).write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf8")
+        Path(a.json).write_text(render_json(report), encoding="utf8")
         print(f"wrote {a.json}")
     if a.md:
         Path(a.md).write_text(to_markdown(report), encoding="utf8")
@@ -138,12 +152,29 @@ def cmd_socdb(a: argparse.Namespace) -> int:
                   file=sys.stderr)
             return 2
         soc = load_soc(a.name, data_dir=d)
-        print(json.dumps(soc.summary(), indent=2, default=str))
+        print(dumps(soc.summary()))
         for name in sorted(soc.peripherals)[:a.limit]:
             e = soc.peripherals[name]
             print(f"  {name:<22} 0x{e['base']:08X}  {e.get('type') or '-'}")
         return 0
     return 2
+
+
+def _generator_script() -> Path | None:
+    """tools/gen_socdb.py inside a firmprint checkout, or None if there is no checkout.
+
+    This used to be `Path(__file__).resolve().parents[2] / "tools" / "gen_socdb.py"`.
+    That depth is the repository root only when the package is an editable install; in
+    a wheel it lands above site-packages, and `firmprint build` then executed whatever
+    `tools/gen_socdb.py` an unrelated project happened to have put there.  Requiring
+    the checkout's own `pyproject.toml` beside `tools/` makes "this is the project
+    root" a test of the thing rather than a guess from a directory depth.
+    """
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "tools" / "gen_socdb.py"
+        if candidate.exists() and (parent / "pyproject.toml").exists():
+            return candidate
+    return None
 
 
 def cmd_build(a: argparse.Namespace) -> int:
@@ -154,10 +185,12 @@ def cmd_build(a: argparse.Namespace) -> int:
     """
     import importlib.util
 
-    script = Path(__file__).resolve().parents[2] / "tools" / "gen_socdb.py"
-    if not script.exists():
-        print(f"generator not found at {script}\n"
-              "clone the repository to build databases from your own CMSIS headers",
+    script = _generator_script()
+    if script is None:
+        print("generator not found: `firmprint build` needs the repository checkout "
+              "(tools/gen_socdb.py beside pyproject.toml)\n"
+              "an installed wheel ships pre-built databases and does not include the "
+              "generator -- clone the repository to build from your own CMSIS headers",
               file=sys.stderr)
         return 2
     spec = importlib.util.spec_from_file_location("gen_socdb", script)
@@ -172,7 +205,7 @@ def cmd_build(a: argparse.Namespace) -> int:
     out = Path(a.out) if a.out else (Path(a.data_dir) if a.data_dir else DATA_DIR)
     out.mkdir(parents=True, exist_ok=True)
     dest = out / f"{a.device}.json"
-    dest.write_text(json.dumps(db, indent=1) + "\n", encoding="utf8")
+    dest.write_text(dumps(db, indent=1) + "\n", encoding="utf8")
     print(f"{dest}: {len(db['peripherals'])} peripheral blocks, "
           f"{len(db['types'])} register structs, "
           f"{sum(len(v) for v in db['types'].values())} register offsets, "
@@ -232,10 +265,13 @@ def main(argv: list[str] | None = None) -> int:
     v = sub.add_parser("verify", help="score findings against the image's own symbols")
     v.add_argument("file")
     v.add_argument("--soc")
+    v.add_argument("--base", type=_num, default=None, help="load base for a headerless dump")
     v.add_argument("--data-dir")
     v.add_argument("--budget", type=_num, default=None)
     v.add_argument("--full", action="store_true")
     v.add_argument("--json", help="write the machine-readable verification result")
+    v.add_argument("--strict", action="store_true",
+                   help="exit non-zero on contract violations (same meaning as `scan --strict`)")
     v.set_defaults(fn=None)
 
     m = sub.add_parser("mcp", help="serve the analysis tools over stdio (MCP, JSON-RPC 2.0)")
@@ -251,8 +287,11 @@ def main(argv: list[str] | None = None) -> int:
             from .verify import cmd_verify
             return cmd_verify(a)
         return a.fn(a)
-    except (OSError, ValueError) as exc:
-        # a typo'd path or an unsupported wrapper is a usage error, not a stack trace
+    except (OSError, ValueError, struct.error) as exc:
+        # a typo'd path or an unsupported wrapper is a usage error, not a stack trace.
+        # `struct.error` belongs in that list because a wrapper that is long enough to
+        # sniff but too short to finish parsing raises it from inside the loader, and the
+        # reader still deserves the same one-line answer.
         subject = (getattr(a, "file", None) or getattr(a, "header", None)
                    or getattr(a, "name", None) or "input")
         print(f"error: {subject}: {exc}", file=sys.stderr)

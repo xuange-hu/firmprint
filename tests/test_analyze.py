@@ -15,7 +15,7 @@ from conftest import cortex_m_image
 
 from firmprint.analyze import SCHEMA, analyze, to_markdown
 from firmprint.decode import available as capstone_available
-from firmprint.evidence import STRICT_CONFIDENCE
+from firmprint.evidence import STRICT_CONFIDENCE, dumps
 from firmprint.verify import compare, symbol_oracle
 
 F4 = "stm32f427xx"
@@ -54,7 +54,10 @@ def test_the_file_identity_is_hashed_not_just_named(report, elf_path):
 
 
 def test_a_report_is_serialisable_as_written_by_the_cli(report):
-    text = json.dumps(report, indent=2, default=str)
+    # `dumps`, not `json.dumps(..., default=str)`: the serializer the CLI uses refuses
+    # anything it would otherwise have to stringify, so this proves the report is
+    # JSON-native rather than proving a coercion hid whatever leaked into it.
+    text = dumps(report)
     assert json.loads(text)["meta"]["soc"]["device"] == F4
 
 

@@ -73,6 +73,32 @@ def test_a_pinned_base_and_hex_budget_are_accepted(bin_path, capsys):
     assert "decoded     " in out
 
 
+def test_soc_overrides_the_ranking_instead_of_asking_for_it(bin_path, capsys):
+    """`--soc` is the "I know what board this is" switch: the report must say that part.
+
+    The F7 database is the wrong one for an F4 build, which is exactly why this test
+    pins it: if the ranking quietly won, `--soc` would be decoration.
+    """
+    assert cli.main(["scan", str(bin_path), "--soc", "stm32h743xx", "--no-code",
+                     "--format", "json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["meta"]["soc"]["device"] == "stm32h743xx"
+    assert report["meta"]["soc_scan"]["databases_considered"] == ["stm32h743xx"]
+
+
+def test_full_ignores_the_budget_it_was_given(bin_path, capsys):
+    from firmprint.decode import available as capstone_available
+    if not capstone_available():
+        pytest.skip("capstone not installed: nothing to compare")
+    assert cli.main(["scan", str(bin_path), "--budget", "4096", "--format", "json"]) == 0
+    capped = json.loads(capsys.readouterr().out)
+    assert cli.main(["scan", str(bin_path), "--full", "--format", "json"]) == 0
+    whole = json.loads(capsys.readouterr().out)
+    assert capped["meta"]["decode"]["bytes_decoded"] <= 4096
+    assert whole["meta"]["decode"]["bytes_decoded"] > capped["meta"]["decode"]["bytes_decoded"]
+    assert whole["meta"]["decode"]["coverage"] > capped["meta"]["decode"]["coverage"]
+
+
 # --------------------------------------------------------------------------- failures
 
 def test_a_missing_file_is_a_message_not_a_traceback(tmp_path, capsys):
@@ -183,6 +209,33 @@ def test_verify_says_plainly_when_an_image_has_no_symbols(tmp_path, capsys):
     p.write_bytes(cortex_m_image(code_bytes=0x400))
     assert cli.main(["verify", str(p)]) == 0
     assert "no oracle available" in capsys.readouterr().out
+
+
+def test_verify_pins_a_base_for_a_dump_from_the_command_line(bin_path, capsys):
+    """`verify --base` has to be wired through argparse, not only through the library."""
+    assert cli.main(["verify", str(bin_path), "--base", "0x08000000"]) == 0
+    assert "matched part" in capsys.readouterr().out
+
+
+def test_verify_strict_reaches_the_command_from_the_command_line(monkeypatch, tmp_path):
+    from firmprint import verify
+    got: dict = {}
+    report = {"meta": {"file": {"path": "x.elf", "size": 1, "sha256": "0" * 64},
+                       "container": {}, "soc": None, "decode": {}, "carve_stats": {}},
+              "findings": [], "contract": {"strict": True, "violations": ["x: no evidence"]}}
+    result = {"rows": [], "detected_peripherals": 0, "oracle_modules": 0, "confirmed": 0,
+              "missed": [], "recall_over_drivers": 0.0, "unconfirmed_peripherals": [],
+              "peripherals_by_engine": {}}
+
+    def fake(path, **kw):
+        got.update(kw)
+        return report, result, {}
+
+    monkeypatch.setattr(verify, "run_verification", fake)
+    p = tmp_path / "x.elf"
+    assert cli.main(["verify", str(p), "--base", "0x08001000", "--soc", "stm32f427xx"]) == 0
+    assert got["base"] == 0x08001000 and got["soc"] == "stm32f427xx"
+    assert cli.main(["verify", str(p), "--strict"]) == 1
 
 
 def _stub_meta() -> dict:
