@@ -6,6 +6,7 @@ becoming slow.
 """
 from __future__ import annotations
 
+import copy
 import json
 import struct
 from pathlib import Path
@@ -255,3 +256,20 @@ def test_markdown_does_not_truncate_the_violation_line(tmp_path):
     p.write_bytes(cortex_m_image())
     md = to_markdown(analyze(str(p), skip_code=True))
     assert "contract:" in md.splitlines()[-1]
+
+
+def test_a_markdown_table_that_stops_at_40_rows_says_how_many_it_left_out(report):
+    """`--md` writes the report a person attaches to an issue; 40 of 45 rows is not 45.
+
+    The text table has always ended with "... N more finding(s)". The markdown did not,
+    so the file version of the same scan read as a complete list -- and the claim the
+    whole project is built on is that a displayed subset names the whole it came from.
+    """
+    thin = copy.deepcopy(report)
+    thin["findings"] = [{"kind": "peripheral.usage", "subject": f"P{i}", "confidence": 0.5,
+                         "summary": "x" * 200} for i in range(45)]
+    md = to_markdown(thin)
+    assert md.count("\n| `") == 40
+    assert "... 5 more finding(s) not shown in this table" in md
+    assert "all 45" in md
+    assert ("| " + "x" * 149 + "… |") in md, "a cut summary must show that it was cut"

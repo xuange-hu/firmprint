@@ -17,6 +17,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 
 import pytest
@@ -295,6 +296,26 @@ def test_a_quoted_row_is_checked_against_the_board_that_printed_it():
     assert chk.subset(frag, {"kind": "peripheral.access", "subject": "RCC",
                              "summary": "RCC: 182 decoded load/store(s)"})
     assert not any(chk.subset(frag, f) for f in v7["findings"])
+
+
+def test_the_test_count_in_the_readme_is_the_number_pytest_collects():
+    """README promises "N tests"; the only honest source for N is the collector.
+
+    That sentence has read 240+, 250 and 277 as the suite grew, and each one was true
+    only for the commit that wrote it. A pinned number nobody can re-check is the same
+    failure this whole file exists to prevent, just in a place the scan-output checker
+    cannot see. `--collect-only` is not a test run, so this cannot recurse.
+    """
+    proc = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q"],
+                          cwd=str(ROOT), capture_output=True, text=True, check=False)
+    m = re.search(r"(\d+) tests? collected", proc.stdout)
+    assert m, f"the collector said nothing useful ({proc.returncode}):\n{proc.stdout[-400:]}"
+    collected = int(m.group(1))
+    readme = (ROOT / "README.md").read_text(encoding="utf8")
+    claimed = set(re.findall(r"python -m pytest -q\s+#\s*(\d+) tests", readme))
+    assert claimed, "README no longer spells a test count the way this test can read it"
+    assert claimed == {str(collected)}, (
+        f"README claims {sorted(claimed)} tests, the suite collects {collected}")
 
 
 @contextlib.contextmanager

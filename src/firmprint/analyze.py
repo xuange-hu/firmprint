@@ -158,8 +158,19 @@ def to_markdown(report: dict) -> str:
         lines.append(f"- note: {reason} → register-level access not attempted "
                      "(address carving only)")
     lines += ["", "| finding | subject | conf | summary |", "|---|---|---|---|"]
-    for f in report["findings"][:40]:
-        lines.append(f"| `{f['kind']}` | {f['subject']} | {f['confidence']:.2f} | {f['summary'][:150]} |")
+    shown = report["findings"][:40]
+    for f in shown:
+        # A summary cut at a fixed column reads as the whole claim.  The ellipsis costs one
+        # character and makes it obvious that `--json` has the rest.
+        summary = f["summary"] if len(f["summary"]) <= 150 else f["summary"][:149].rstrip() + "…"
+        lines.append(f"| `{f['kind']}` | {f['subject']} | {f['confidence']:.2f} | {summary} |")
+    left = len(report["findings"]) - len(shown)
+    if left > 0:
+        # the table used to stop at 40 rows and say nothing, so a reader of `report.md`
+        # counted 40 findings in a report that held 118 -- the tool's own contract is that
+        # a displayed subset names the whole it was taken from
+        lines.append(f"\n... {left} more finding(s) not shown in this table; "
+                     f"`--json` carries all {len(report['findings'])}")
     lines.append("")
     lines.append(f"contract: {len(report['contract']['violations'])} violation(s)")
     return "\n".join(lines) + "\n"

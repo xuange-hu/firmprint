@@ -208,9 +208,16 @@ def _render(report: dict, r: dict, samples: dict[str, list[str]], path: str) -> 
             "application code are invisible to it. Each one still carries offsets and bytes.",
             ""]
     if r["missed"]:
-        out.append("Missed drivers, with the symbol evidence that should have anchored them:")
+        out.append(f"Missed drivers ({len(r['missed'])} of {r['oracle_modules']} "
+                   f"oracle module(s)), with the symbol evidence that should have anchored them:")
         for m in r["missed"][:12]:
-            out.append(f"- {m}: " + ", ".join(samples.get(m, [])[:3]))
+            # three names is an example, not the module's symbol table; the count it was
+            # drawn from is in the table above (`linked_symbols`), so say which is which
+            shown = ", ".join(samples.get(m, [])[:3])
+            out.append(f"- {m}: {shown}")
+        if len(r["missed"]) > 12:
+            out.append(f"- ... {len(r['missed']) - 12} more missed module(s); the table above "
+                       f"lists all {len(r['missed'])}, `--json` carries every one")
         out.append("")
     out.append(f"contract: {len(report['contract']['violations'])} violation(s)")
     return "\n".join(out) + "\n"

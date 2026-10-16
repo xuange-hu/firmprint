@@ -191,3 +191,25 @@ def test_verify_renders_the_missed_drivers_with_their_symbols(capsys, monkeypatc
     out = verify._render(report, result, {"LTDC": ["HAL_LTDC_Init", "HAL_LTDC_ConfigLayer"]}, "x.elf")
     assert "LTDC" in out and "HAL_LTDC_Init" in out
     assert "recall 0%" in out
+
+
+def test_a_missed_list_that_stops_at_twelve_says_what_it_left_out():
+    """The bullet list is capped at 12; the sentence above it must carry the real total.
+
+    Without the count, a reader who sees twelve bullets and a heading that says "Missed
+    drivers" has read 12 as the answer, which is how a subset becomes a statistic.
+    """
+    report = {"meta": {"file": {"path": "x.elf", "size": 1, "sha256": "0" * 64},
+                       "container": {}, "soc": None, "decode": {}, "carve_stats": {}},
+              "findings": [], "contract": {"strict": True, "violations": []}}
+    names = [f"MOD{i}" for i in range(15)]
+    result = {"rows": [{"oracle_module": n, "linked_symbols": 2, "expected_blocks": [n],
+                        "firmprint_blocks": [], "status": "missed", "engines": []}
+                       for n in names],
+              "detected_peripherals": 0, "oracle_modules": 15, "confirmed": 0,
+              "missed": names, "recall_over_drivers": 0.0,
+              "unconfirmed_peripherals": [], "peripherals_by_engine": {}}
+    out = verify._render(report, result, {}, "x.elf")
+    assert "Missed drivers (15 of 15 oracle module(s))" in out
+    assert "3 more missed module(s)" in out
+    assert out.count("\n- MOD") == 12

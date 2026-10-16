@@ -400,7 +400,10 @@ def rank_socs(image: Image, socs: dict[str, Soc], table: Finding | None,
                 "alternative map; add one with `python tools/gen_socdb.py build`"]
                if len(names) == 1 else [])
             + ([f"a second map scores within 0.06 of this one: the constants in this image "
-                f"do not separate {r['name']} from {rival}"] if contested else []),
+                f"do not separate {r['name']} from {rival}"] if contested else [])
+            + ([f"{len(rows) - 4} installed map(s) scored against this image but are not "
+                f"reported: only the top 4 become findings, and their numbers are in "
+                f"`socdb list`"] if rank == 0 and len(rows) > 4 else []),
             metrics={"constants_explained": r["mine"], "exclusive_constants": r["lead"],
                      "blind_constants": r["blind"], "blocks_explained": r["blocks"],
                      "score": round(r["score"], 4), "contested": contested,

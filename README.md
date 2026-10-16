@@ -91,7 +91,7 @@ pip install -e ".[dev]"
 python tools/make_synthetic.py blob.bin   # a shaped Cortex-M image: no download, no key
 firmprint scan blob.bin --strict          # the dependency-free path still answers
 python tools/get_sample.py --all          # 2 MIT-licensed OpenMV images, pinned by sha256
-python -m pytest -q                       # 277 tests, no network
+python -m pytest -q                       # 281 tests, no network
 ```
 
 ## 30-second tour
@@ -347,7 +347,7 @@ for the two worked analyses.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q          # 277 tests; the sample-dependent ones skip cleanly
+python -m pytest -q          # 281 tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
 python tools/check_doc_quotes.py   # every report line *and every number in a sentence*

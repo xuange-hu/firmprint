@@ -337,3 +337,30 @@ def test_a_map_that_explains_nothing_exclusively_is_not_named_as_a_match():
         assert f.metrics["exclusive_constants"] == 0
         assert f.confidence < STRICT_CONFIDENCE, f.confidence
         assert "no installed map is distinctive" in f.summary
+
+
+def test_a_ranking_shows_four_maps_and_names_the_ones_it_dropped():
+    """Ranking is the one place the tool deliberately reports less than it scored.
+
+    Six installed maps, four `soc.candidate` findings: a reader has no way to tell
+    "these are the databases" from "these are the top four" unless the finding says
+    so, and that confusion is exactly how a ranking turns into a part number.
+    """
+    f4 = load_soc("stm32f427xx")
+    bases = sorted({e["base"] for e in f4.peripherals.values()})[:60]
+    body = struct.pack(f"<{len(bases)}I", *bases)
+    data = (cortex_m_image(base=0x0800_0000)
+            + b"\xff" * (-len(cortex_m_image(base=0x0800_0000)) % MIN_ALIGN) + body)
+    img = load_raw(data, "six-maps.bin")
+    tables = scan_tables(img)
+    exclude = [(s.vaddr, s.end) for s in img.segments]
+    socs = {f"map{i}": load_soc("stm32f427xx") for i in range(6)}
+    explained = {n: explained_constants(img, s, exclude_ranges=exclude)
+                 for n, s in socs.items()}
+    ranked = rank_socs(img, socs, tables[0], explained)
+    assert len(ranked) == 4, [f.subject for f in ranked]
+    assert any("2 installed map(s) scored against this image but are not reported"
+               in u for u in ranked[0].unknowns), ranked[0].unknowns
+    # the disclosure belongs to the headline candidate; a runner-up is already a
+    # runner-up and must not imply it is the last row of the whole ranking
+    assert not any("not reported" in u for u in ranked[1].unknowns)
