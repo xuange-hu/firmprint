@@ -272,6 +272,31 @@ def test_a_number_from_the_other_board_is_not_this_boards_answer():
     assert chk.board_of(chk.ROOT / "README.md", ["openmv2", "openmv3"]) is None
 
 
+def test_a_quoted_row_is_checked_against_the_board_that_printed_it():
+    """Scoping has to reach the row quotes, not only the numbers in sentences.
+
+    The same `peripheral.access/RCC/0.86` triple is real on both boards with a different
+    count, so a corpus holding both boards accepts either quote and catches neither: the F4
+    study could paste the F7 row, every field would still "match a real run", and the gate
+    would print ok.
+    """
+    f4 = ["peripheral.access       RCC                  0.86  RCC: 182 decoded load/store(s)"
+          " through a tracked base register"]
+    f7 = ["peripheral.access       RCC                  0.86  RCC: 265 decoded load/store(s)"
+          " through a tracked base register"]
+    triple = ("peripheral.access", "RCC", "0.86")
+    v4, v7 = chk.view(f4, []), chk.view(f7, [])
+    assert [t for t in v4["pairs"][triple] if "182" in t]
+    assert not any("182" in t for t in v7["pairs"][triple])
+    assert "182" in v4["lines"] and "182" not in v7["lines"]
+    assert "265" in v7["text"] and "265" not in v4["text"]
+    # and a fragment is matched only against findings of the same board
+    frag = {"kind": "peripheral.access", "subject": "RCC", "summary": "RCC: 182 decoded"}
+    assert chk.subset(frag, {"kind": "peripheral.access", "subject": "RCC",
+                             "summary": "RCC: 182 decoded load/store(s)"})
+    assert not any(chk.subset(frag, f) for f in v7["findings"])
+
+
 @contextlib.contextmanager
 def _clean_argv():
     """The checker reads argv; a test must not inherit pytest's."""

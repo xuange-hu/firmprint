@@ -133,8 +133,9 @@ def synthetic_image() -> Path | None:
     return blob
 
 
-def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[str]]]:
-    """Return (every finding, the whole live corpus, the corpus per sample directory).
+def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[str]],
+                                         dict[str, list[dict]]]:
+    """Return (every finding, the whole live corpus, the corpus and the findings per board).
 
     The corpus is the printed text of every scan *plus* the counts nobody prints in a
     sentence's own words: total findings per image, findings per kind, the same two for a
@@ -156,9 +157,11 @@ def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[s
     findings: list[dict] = []
     lines: list[str] = []
     by_board: dict[str, list[str]] = {}
+    board_findings: dict[str, list[dict]] = {}
     for path in images:
         tag = f"{path.parent.name}/{path.name}"
         board = by_board.setdefault(path.parent.name, [])
+        seen = board_findings.setdefault(path.parent.name, [])
         full: dict = {}
         for args, sink in ((["scan", str(path), "--format", "json", "--max-findings", "10000"],
                             "json"),
@@ -182,6 +185,7 @@ def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[s
             got = report["findings"]
             if sink == "json":
                 findings.extend(got)
+                seen.extend(got)
                 full = report
             v = len(report.get("contract", {}).get("violations", []))
             counts = [f"counts  {tag} {sink}: {len(got)} findings, {v} violations"]
@@ -232,7 +236,7 @@ def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[s
     lines.extend(shared)
     for board_lines in by_board.values():
         board_lines.extend(shared)
-    return findings, lines, by_board
+    return findings, lines, by_board, board_findings
 
 
 def quoted(md: Path, want_json: bool) -> list[tuple[str, str]]:
@@ -401,6 +405,39 @@ def board_of(md: Path, names: list[str]) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
+def view(ls: list[str], fs: list[dict]) -> dict:
+    """One corpus, ready to check a document against.
+
+    Scoping is the point: the quoted row, the pasted JSON fragment and the number in a
+    sentence are all claims about *this* board's image, and a corpus holding the other
+    board's runs lets a wrong one pass because some unrelated line happens to print it.
+    """
+    # (kind, subject, conf@2dp) -> the summaries the tool printed for that triple
+    pairs: dict[tuple[str, str, str], list[str]] = {}
+    for line in ls:
+        s = line.strip()
+        if m := FINDING.match(s):
+            pairs.setdefault(m.groups()[:3], []).append(norm(s[m.end():].strip()))
+    # and the same triples from the JSON, where nothing is truncated at the column:
+    # a doc may quote further into a summary than the text table ever printed
+    summaries: dict[tuple[str, str, str], list[str]] = {}
+    for f in fs:
+        key = (f["kind"], str(f["subject"])[:19], f"{f['confidence']:.2f}")
+        summaries.setdefault(key, []).append(norm(f["summary"]))
+    return {
+        # the corpus with its lines intact, for prose claims: `norm` folds newlines away,
+        # which is right for matching a re-wrapped quote and wrong for deciding whether a
+        # run ever printed a number next to a noun
+        "lines": corpus(ls),
+        # the same corpus collapsed to one string, for a transcript that may have been
+        # re-wrapped by hand
+        "text": norm("\n".join(ls)),
+        "pairs": pairs,
+        "summaries": summaries,
+        "findings": fs,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--list", action="store_true", help="print each quote that was checked")
@@ -425,31 +462,20 @@ def main() -> int:
     blob = synthetic_image()
     if blob is not None:
         images = [*images, blob]
-    findings, lines, boards = run_all(images)
+    findings, lines, boards, board_finds = run_all(images)
     shutil.rmtree(SYNTH_DIR, ignore_errors=True)
-    live_text = norm("\n".join(lines))
-    # the same corpus with its lines intact, for prose claims: `norm` folds newlines away,
-    # which is right for matching a re-wrapped quote and wrong for deciding whether a run
-    # ever printed a number next to a noun
-    live_lines = corpus(lines)
-    board_corpora = {name: corpus(ls) for name, ls in boards.items()}
-    # (kind, subject, conf@2dp) -> the summaries the tool printed for that triple
-    live_pairs: dict[tuple[str, str, str], list[str]] = {}
-    for line in lines:
-        s = line.strip()
-        if m := FINDING.match(s):
-            live_pairs.setdefault(m.groups()[:3], []).append(norm(s[m.end():].strip()))
-    # and the same triples from the JSON, where nothing is truncated at the column:
-    # a doc may quote further into a summary than the text table ever printed
-    live_summaries: dict[tuple[str, str, str], list[str]] = {}
-    for f in findings:
-        key = (f["kind"], str(f["subject"])[:19], f"{f['confidence']:.2f}")
-        live_summaries.setdefault(key, []).append(norm(f["summary"]))
+    # one view per board plus the whole corpus; a document picks its view by filename, so a
+    # quote in the OpenMV3 study is checked against OpenMV3 runs and nothing else
+    names = sorted(boards)
+    views = {"*": view(lines, findings)}
+    views.update({n: view(boards[n], board_finds.get(n, [])) for n in names})
     problems: list[str] = []
     checked = 0
 
     for md in DOCS:
         rel = md.relative_to(ROOT)
+        board = board_of(md, names)
+        v = views[board or "*"]
         for _lang, block in quoted(md, want_json=True):
             try:
                 frag = json.loads(block)
@@ -460,7 +486,7 @@ def main() -> int:
                 if not (isinstance(item, dict) and "kind" in item):
                     continue
                 checked += 1
-                if not any(subset(item, f) for f in findings):
+                if not any(subset(item, f) for f in v["findings"]):
                     problems.append(f"{rel}: quoted finding fragment matches no real run: "
                                     f"{json.dumps(item)[:120]}")
         for _lang, block in quoted(md, want_json=False):
@@ -473,7 +499,7 @@ def main() -> int:
                     if a.list:
                         print(f"  quote  {rel}: {s[:70]}")
                     triple = m.groups()[:3]
-                    if triple not in live_pairs:
+                    if triple not in v["pairs"]:
                         problems.append(f"{rel}: {s[:70]} -- no real run prints that "
                                         f"{m.group(1)}/{m.group(2)} at {m.group(3)}")
                         continue
@@ -491,8 +517,8 @@ def main() -> int:
                     quoted_tail = norm(" ".join(tail)).split("…")[0].split(" ...")[0].strip()
                     if quoted_tail and not any(
                             quoted_tail in t or t.startswith(quoted_tail)
-                            for t in live_pairs[triple]) and not any(
-                            quoted_tail in sm for sm in live_summaries.get(triple, [])):
+                            for t in v["pairs"][triple]) and not any(
+                            quoted_tail in sm for sm in v["summaries"].get(triple, [])):
                         problems.append(f"{rel}: {m.group(1)}/{m.group(2)} at "
                                         f"{m.group(3)} is real, but no run prints the "
                                         f"summary quoted here: {quoted_tail[:70]}")
@@ -507,8 +533,9 @@ def main() -> int:
                     checked += 1
                     if a.list:
                         print(f"  quote  {rel}: {head[:70]}")
-                    if head not in live_text:
-                        problems.append(f"{rel}: header line not printed by any real run: {head[:70]}")
+                    if head not in v["text"]:
+                        problems.append(f"{rel}: header line not printed by any real run of "
+                                        f"{board or 'the documented images'}: {head[:70]}")
             for run in header_runs(block_lines):
                 text = norm(" ".join(run))
                 if "…" in text or " ..." in text:
@@ -516,7 +543,7 @@ def main() -> int:
                 checked += 1
                 if a.list:
                     print(f"  run    {rel}: {text[:70]}")
-                if text not in live_text:
+                if text not in v["text"]:
                     problems.append(
                         f"{rel}: {len(run)} header lines quoted as one transcript, but no run "
                         f"prints them consecutively -- a line was dropped or taken from "
@@ -524,8 +551,8 @@ def main() -> int:
 
     for md in DOCS:
         rel = md.relative_to(ROOT)
-        name = board_of(md, sorted(board_corpora))
-        live = board_corpora[name] if name else live_lines
+        name = board_of(md, names)
+        live = views[name or "*"]["lines"]
         for num, noun, where in prose_claims(md.read_text(encoding="utf8")):
             checked += 1
             if a.list:
@@ -534,8 +561,8 @@ def main() -> int:
                 continue
             # the same number printed by a *different* board is the failure mode this scoping
             # exists to catch, so name the corpus that does have it rather than leave a mystery
-            elsewhere = [b for b, text in board_corpora.items()
-                         if text is not live and claims_printed(text, num, noun)]
+            elsewhere = [b for b in names
+                         if b != name and claims_printed(views[b]["lines"], num, noun)]
             hint = ""
             if elsewhere:
                 who = " and ".join(elsewhere)
