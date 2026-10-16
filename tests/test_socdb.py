@@ -159,7 +159,9 @@ def test_load_all_skips_a_corrupt_database_instead_of_dying(tmp_path, capsys):
     socs = load_all(tmp_path)
     assert "stm32f427xx" in socs
     assert "broken" not in socs
-    assert "skipping broken" in capsys.readouterr().out
+    # stderr, not stdout: `scan --format json` puts the report on stdout, and a line of
+    # prose ahead of it breaks anything that pipes the report into a parser
+    assert "skipping broken" in capsys.readouterr().err
 
 
 def test_peripheral_at_returns_none_outside_every_block():

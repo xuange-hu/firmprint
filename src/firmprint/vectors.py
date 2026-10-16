@@ -331,6 +331,12 @@ def rank_socs(image: Image, socs: dict[str, Soc], table: Finding | None,
         blind_rate = blind / (blind + len(mine)) if (blind + len(mine)) else 0.0
         score = (0.50 * coverage + 0.30 * lead_rate - 0.55 * blind_rate
                  + 0.06 * bool(flash_hit) + 0.09 * bool(ram_hit))
+        if not mine and not flash_hit and not ram_hit:
+            # Nothing in this image lands in that map: no device constant, and neither the
+            # load region nor the reset stack pointer is inside a declared window.  A
+            # `soc.candidate` row would put a part name on zero evidence -- which is how a
+            # one-byte file used to come back as "stm32f427xx, conf 0.35".
+            continue
         rows.append({"name": name, "score": score, "mine": len(mine), "lead": lead,
                      "blind": blind, "blocks": len(explained[name]["blocks"]),
                      "flash_hit": flash_hit, "ram_hit": ram_hit, "ram_lead": ram_lead,

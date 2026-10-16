@@ -8,6 +8,7 @@ traceable to a single upstream file — that is the point.
 from __future__ import annotations
 
 import json
+import sys
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -230,5 +231,7 @@ def load_all(data_dir: Path | None = None) -> dict[str, Soc]:
         try:
             out[name] = load_soc(d / f"{name}.json")
         except (ValueError, KeyError, json.JSONDecodeError) as exc:   # a bad DB must not kill a scan
-            print(f"warning: skipping {name}: {exc}")
+            # stderr: a warning on stdout corrupts `--format json`, which is the one output
+            # a reader is most likely to pipe into another tool
+            print(f"warning: skipping {name}: {exc}", file=sys.stderr)
     return out
