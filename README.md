@@ -91,7 +91,7 @@ pip install -e ".[dev]"
 python tools/make_synthetic.py blob.bin   # a shaped Cortex-M image: no download, no key
 firmprint scan blob.bin --strict          # the dependency-free path still answers
 python tools/get_sample.py --all          # 2 MIT-licensed OpenMV images, pinned by sha256
-python -m pytest -q                       # 240+ tests, no network
+python -m pytest -q                       # 277 tests, no network
 ```
 
 ## 30-second tour
@@ -104,12 +104,13 @@ firmprint scan app.hex --json report.json --md report.md
 firmprint scan dump.bin --soc stm32h743xx         # stop ranking, use this map
 firmprint scan dump.bin --full                    # decode every code byte, no budget
 firmprint verify firmware.elf                     # score findings against the image's own symbols
+firmprint verify firmware.elf --strict            # and fail a run whose own contract is broken
 firmprint socdb list                              # installed maps + the vendor header each came from
 firmprint mcp --self-test                         # check the MCP server without a client
 ```
 
-Exit codes are scriptable: `--strict` makes a non-empty evidence contract a failure, so a
-CI job or a triage pipeline can refuse an untrustworthy report.
+Exit codes are scriptable: `--strict` makes a non-empty evidence contract a failure on both
+`scan` and `verify`, so a CI job or a triage pipeline can refuse an untrustworthy report.
 
 ## What makes it different
 
@@ -346,7 +347,7 @@ for the two worked analyses.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q          # 240+ tests; the sample-dependent ones skip cleanly
+python -m pytest -q          # 277 tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
 python tools/check_doc_quotes.py   # every report line *and every number in a sentence*

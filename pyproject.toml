@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=68"]
+# setuptools>=77 is the first release that accepts `license` as an SPDX expression
+# (PEP 639); below it the build prints a deprecation warning and the table form is the
+# only option.  The deadline for the old form is 2027-02-18.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,14 +11,14 @@ version = "0.1.0"
 description = "Evidence-backed firmware identification for Cortex-M images: every claim carries the offset and bytes that produced it"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["firmware", "reverse-engineering", "cortex-m", "stm32", "embedded",
             "dfir", "vector-table", "mcp"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
@@ -61,5 +64,8 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 ignore = ["E501", "SIM105"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+# Deliberately empty.  `-q` here used to double with the `-q` in the README and CI command,
+# and pytest reads two of them as "show no summary line" -- so the documented way to run the
+# suite printed 277 dots and never said 277, which is a claim the docs could not show.
+addopts = ""
 testpaths = ["tests"]

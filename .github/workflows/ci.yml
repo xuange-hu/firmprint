@@ -76,6 +76,55 @@ jobs:
           python -c "import json;c=json.load(open('out.json',encoding='utf-8'))['contract'];assert not c['violations'],c"
           python -m firmprint scan blob.bin --no-code --strict
 
+  packaging:
+    # Every other job here installs with `pip install -e .`, which imports the package
+    # straight out of `src/`.  An editable install is blind to packaging mistakes: if
+    # `data/*.json` or `py.typed` stopped being copied into the distribution, all of them
+    # would stay green while the wheel a reader downloads cannot name a single peripheral.
+    # This job installs the artifact instead of the source tree, offline, and runs it from
+    # a directory that is not the checkout -- so it also catches a module that reads its
+    # data files by a path relative to the repository.
+    name: install the built wheel, offline, outside the checkout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Install the wheel with --no-index
+        # `--no-index` turns the zero-dependency promise into an exit code: if a runtime
+        # requirement were real, resolving it without an index would fail right here.
+        # The venv goes to `$RUNNER_TEMP`, not the checkout, so nothing below can accidentally
+        # import from `src/` and mistake that for the installed package.
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --no-index "$GITHUB_WORKSPACE"/dist/firmprint-*.whl
+
+      - name: The installed package must answer without the checkout, capstone, or a network
+        run: |
+          PY="$RUNNER_TEMP/venv/bin/python"
+          FP="$RUNNER_TEMP/venv/bin/firmprint"
+          # the generator is a repo tool, deliberately not part of the package; the scanner
+          # under test is the installed one
+          "$PY" "$GITHUB_WORKSPACE/tools/make_synthetic.py" blob.bin
+          "$FP" --version
+          test -n "$("$FP" socdb list)"                     # data/*.json really shipped
+          test "$("$FP" socdb list | grep -c '^stm32')" -eq 3
+          "$FP" scan blob.bin --no-code --strict
+          "$FP" scan blob.bin --no-code --json out.json
+          "$PY" -c "import json;c=json.load(open('out.json',encoding='utf-8'))['contract'];assert not c['violations'],c"
+          "$PY" -m firmprint mcp --self-test
+          "$PY" -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('capstone') is None else 1)"
+          test "$("$PY" -m pip freeze | wc -l)" -eq 1       # the wheel, and nothing else
+        working-directory: ${{ runner.temp }}
+
   verification:
     # The answer key.  Needs the samples, so it is the one job that talks to GitHub
     # releases -- and it rewrites nothing, it only diffs.
@@ -97,9 +146,13 @@ jobs:
         run: python tools/get_sample.py --all
 
       - name: Score against the image's own symbols (both boards)
+        # `--strict` is what makes this a gate: `verify` prints the violation count
+        # either way, and without the flag an untrustworthy report still exited 0.
+        # Actions runs a multiline `run:` with `bash -e -o pipefail`, so `| tail -20`
+        # cannot swallow the exit code -- the pipeline fails with the program.
         run: |
-          python -m firmprint verify samples/openmv2/firmware.elf | tail -20
-          python -m firmprint verify samples/openmv3/firmware.elf | tail -20
+          python -m firmprint verify samples/openmv2/firmware.elf --strict | tail -20
+          python -m firmprint verify samples/openmv3/firmware.elf --strict | tail -20
 
       - name: Strict scans must fail closed on zero violations
         run: |
