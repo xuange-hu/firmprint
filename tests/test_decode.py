@@ -304,6 +304,24 @@ def test_the_truncation_note_only_appears_when_the_list_really_was_truncated(soc
                for u in big.unknowns)
 
 
+def test_a_coverage_row_that_anchors_eight_addresses_says_how_many_were_named(soc, image):
+    """The summary's address list is an example, and the evidence list is a sample of it.
+
+    "e.g." licenses the prose, but a reader who counts eight evidence rows under a row about
+    twelve addresses still has to be told that four more were left out -- and told by the
+    finding, not by reading the source.
+    """
+    f7 = load_soc("stm32f765xx")
+    cap = decode._COVERAGE_EVIDENCE_CAP
+    many = [0x4400_0000 + 0x100 * i for i in range(cap + 4)]
+    f, _ = _gap(soc, {"stm32f765xx": f7}, image, many)
+    assert len(f.evidence) == cap
+    assert any(f"only {cap} of the {len(many)} named address(es)" in u for u in f.unknowns)
+    few = many[:cap]
+    f2, _ = _gap(soc, {"stm32f765xx": f7}, image, few)
+    assert len(f2.evidence) == cap and not any("given as evidence" in u for u in f2.unknowns)
+
+
 def test_a_map_that_sees_everything_produces_no_coverage_finding(soc, image):
     """No gap, no claim: silence is the correct output when nothing is missing."""
     f, _ = _gap(soc, {}, image, [])

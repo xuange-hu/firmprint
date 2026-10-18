@@ -202,6 +202,11 @@ def entropy_regions(image: Image, block: int = 0x1000) -> list[dict]:
     return rows
 
 
+#: how many high-entropy blocks get an anchored row.  The count is the whole; the list is a
+#: sample, and a finding that shows six of twenty has to say so.
+_ENTROPY_EVIDENCE_CAP = 6
+
+
 def entropy_finding(image: Image, block: int = 0x1000) -> Finding | None:
     rows = entropy_regions(image, block)
     if not rows:
@@ -216,11 +221,17 @@ def entropy_finding(image: Image, block: int = 0x1000) -> Finding | None:
                  f"{len(hi)}/{len(rows)} blocks above 7.9 (encrypted or compressed payload)"),
         engine="carve/1",
         rule="region.entropy.shannon",
+        unknowns=["entropy cannot distinguish TLS/PSK-encrypted OTA from plain deflate; "
+                  "correlation with a container magic is required for a firm claim"]
+                 # the subject and the summary both count every block over the threshold,
+                 # but only the first few get a row a reader can go and check
+                 + ([f"evidence lists the first {_ENTROPY_EVIDENCE_CAP} of {len(hi)} "
+                    f"high-entropy block(s) by address; the count in the summary is the "
+                    f"whole"] if len(hi) > _ENTROPY_EVIDENCE_CAP else []),
         evidence=[Evidence(kind="region", note=f"block starting at 0x{r['vaddr']:08X}",
                            vaddr=r["vaddr"], count=r["size"],
-                           text=f"entropy {r['entropy']} bits/byte") for r in hi[:6]],
-        unknowns=["entropy cannot distinguish TLS/PSK-encrypted OTA from plain deflate; "
-                  "correlation with a container magic is required for a firm claim"],
+                           text=f"entropy {r['entropy']} bits/byte")
+                           for r in hi[:_ENTROPY_EVIDENCE_CAP]],
         metrics={"blocks": len(rows), "high_entropy_blocks": len(hi),
                  "max_entropy": top["entropy"], "max_entropy_vaddr": f"0x{top['vaddr']:08X}"},
     )

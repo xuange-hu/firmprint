@@ -64,6 +64,11 @@ _UNMAPPED_LIST_CAP = 24
 #: A count is never taken from this list -- see `_TALLY`.
 _EVIDENCE_CAP = 24
 
+#: how many of the addresses a `soc.coverage` row names get an anchored instruction.  The
+#: summary says "e.g." and the metrics give the total, but a reader who counts eight evidence
+#: rows under a sentence about twenty-four addresses is entitled to be told which is which.
+_COVERAGE_EVIDENCE_CAP = 8
+
 #: private key under which `_record` accumulates the true counts, removed from `stats`
 #: before the report is built so no internal field reaches a reader or the JSON schema.
 _TALLY = "_access_tally"
@@ -217,7 +222,9 @@ def _coverage_finding(soc: Soc, ranked: list[int], unmapped: Counter, sites: dic
         if hits:
             explained[name] = hits
     claimed = sorted({a for hits in explained.values() for a in hits})
-    ev = [sites[a] for a in top if a in sites][:8]
+    ev = [sites[a] for a in top if a in sites]
+    anchorable = len(ev)
+    ev = ev[:_COVERAGE_EVIDENCE_CAP]
     if not ev:                                   # a claim with no place is decoration
         return None
     rival = max(explained, key=lambda n: len(explained[n])) if explained else None
@@ -255,7 +262,10 @@ def _coverage_finding(soc: Soc, ranked: list[int], unmapped: Counter, sites: dic
              "contested count is exact for this decode"),
             "0xE000_0000 and above is the ARM core (NVIC/SysTick/SCB) and lives in the "
             "core header, so it is excluded from this gap by construction",
-        ],
+        ] + ([f"only {_COVERAGE_EVIDENCE_CAP} of the {anchorable} named address(es) whose "
+              f"instructions this decode recovered are given as evidence; the addresses in "
+              f"the summary are an example, the counts in `metrics` are the whole"]
+             if anchorable > _COVERAGE_EVIDENCE_CAP else []),
         metrics={"addresses": len(ranked), "accesses": stats["unmapped_device_accesses"],
                  "contested": len(claimed),
                  "contested_by": {n: len(h) for n, h in explained.items()},

@@ -194,6 +194,29 @@ def test_random_bytes_read_as_an_encrypted_candidate(soc):
     assert any("cannot distinguish" in u for u in f.unknowns)
 
 
+def test_a_row_about_twenty_hot_blocks_shows_six_and_says_so():
+    """The subject counts every block over the threshold; the evidence list cannot.
+
+    An encrypted payload spread over a whole flash area is the case where the count matters
+    most and the rows are least able to fit, so the finding has to name the gap itself rather
+    than leave a reader to notice 20 blocks and 6 rows.
+    """
+    blob = random.Random(11).randbytes(0x1000 * 20)
+    f = carve.entropy_finding(image_of(blob))
+    cap = carve._ENTROPY_EVIDENCE_CAP
+    assert f.metrics["high_entropy_blocks"] == 20 > cap
+    assert len(f.evidence) == cap
+    assert any(f"first {cap} of 20" in u for u in f.unknowns)
+    assert not validate([f])
+
+
+def test_a_short_high_entropy_run_claims_no_limit_it_did_not_hit():
+    """The counterpart: two hot blocks, two rows, and no invented caveat about a cap."""
+    f = carve.entropy_finding(image_of(random.Random(7).randbytes(0x2000)))
+    assert len(f.evidence) == f.metrics["high_entropy_blocks"] == 2
+    assert not any("first" in u and "high-entropy" in u for u in f.unknowns)
+
+
 def test_erased_flash_gets_a_low_confidence_claim_and_no_evidence_needed():
     f = carve.entropy_finding(image_of(bytes(0x1000)))
     assert f.confidence == 0.4 < STRICT_CONFIDENCE
