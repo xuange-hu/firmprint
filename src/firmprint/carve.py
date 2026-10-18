@@ -158,7 +158,13 @@ def usage_findings(per: dict[str, dict], soc: Soc, engine: str = "carve/1") -> l
             summary=(f"{pname} @0x{base:08X} referenced {entry['total']} "
                      f"{'time' if entry['total'] == 1 else 'times'} "
                      f"as an address constant; " + why
-                     + ", ".join(f"{r}({n})" for r, n in regs[:6])),
+                     + ", ".join(f"{r}({n})" for r, n in regs[:6])
+                     # the prose lists six and the metric holds them all; the numbers in the
+                     # sentence do not add up to `referenced`, so the gap is stated rather
+                     # than left for a reader to discover by arithmetic
+                     + (f"; … {len(regs) - 6} more register(s) seen, "
+                        f"{sum(n for _r, n in regs[6:])} reference(s) among them"
+                        if len(regs) > 6 else "")),
             engine=engine,
             rule=("peripheral.usage.carved-constants" if is_per
                   else "memory.reference.carved-constants"),

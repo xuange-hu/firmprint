@@ -10,6 +10,7 @@ memory window is never reported as a peripheral.
 from __future__ import annotations
 
 import random
+import re
 import struct
 
 import pytest
@@ -135,6 +136,49 @@ def test_findings_are_ordered_by_reference_count_then_reported(soc):
     names = [f.subject for f in carve.usage_findings(per, soc)]
     assert names[0] == "USART1"
     assert [f.metrics["references"] for f in carve.usage_findings(per, soc)] == [4, 2]
+
+
+def gpioa_offsets(soc) -> list[int]:
+    """Every CMSIS-named register offset GPIOA has, as the database defines them."""
+    return sorted({off for off, _size, _acc in
+                   soc.types[soc.peripherals["GPIOA"]["type"]].values()})
+
+
+def test_a_row_that_lists_six_registers_accounts_for_the_seventh(soc):
+    """The prose caps at six registers; the reference count above it does not.
+
+    `referenced 8 times` next to six `NAME(n)` pairs is an arithmetic error a reader can
+    only find by subtracting -- and a truncated list that reads like a complete one is
+    exactly the kind of claim this project refuses to make.  So the row states the remainder
+    and what it holds, and this test checks the sentence *adds up* against the metric rather
+    than admiring the wording.
+    """
+    offs = gpioa_offsets(soc)
+    assert len(offs) > 6, "GPIOA must carry enough registers to exercise the cut"
+    g = soc.peripherals["GPIOA"]["base"]
+    counts, hits, _ = carve.carve_bases(
+        image_of(words(*[g + o for o in offs], pad_to=None)), soc)
+    f, = carve.usage_findings(carve.peripheral_usage(counts, hits), soc)
+
+    hidden = len(offs) - 6
+    tail = f.summary.split("; … ")[1]
+    assert tail.startswith(f"{hidden} more register(s) seen, ")
+    unlisted = int(re.search(r"(\d+) reference\(s\) among them", tail).group(1))
+    listed = sum(int(n) for n in re.findall(r"\((\d+)\)", f.summary))
+    assert listed == 6, f.summary
+    assert listed + unlisted == f.metrics["references"] == len(offs)
+    assert len(f.metrics["registers"]) == len(offs), "the metric keeps what the prose cut"
+
+
+def test_a_row_with_room_left_in_the_list_clips_nothing(soc):
+    """The tail is a claim too: printing it when nothing was hidden invents a limit."""
+    offs = gpioa_offsets(soc)[:4]
+    g = soc.peripherals["GPIOA"]["base"]
+    counts, hits, _ = carve.carve_bases(
+        image_of(words(*[g + o for o in offs], pad_to=None)), soc)
+    f, = carve.usage_findings(carve.peripheral_usage(counts, hits), soc)
+    assert "more register" not in f.summary
+    assert sum(f.metrics["registers"].values()) == f.metrics["references"] == len(offs)
 
 
 # ------------------------------------------------------------------------ entropy
