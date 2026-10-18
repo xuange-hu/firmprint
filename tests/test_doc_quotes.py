@@ -517,6 +517,33 @@ def test_the_answer_key_records_nothing_about_the_machine_that_ran_it():
                for d in docs), "the answer key no longer states its own reproducibility rule"
 
 
+def test_the_answer_key_hands_over_a_claim_it_did_not_shorten():
+    """A quoted report line in `verification/*.md` is the line, not a window into it.
+
+    The generator pasted the `soc.coverage` summary `[:200]` characters at a time, and on the
+    pinned OpenMV2 build that cut the sentence at `1 of them ARE in stm32h74…` -- the answer
+    key that exists so a stranger can check a claim ended in a truncated identifier and
+    dropped the clause explaining what the rival map saw.  An ellipsis inside a *generated*
+    document is different from one in a transcript: nothing upstream cut that text for width,
+    the document did.
+    """
+    docs = {md.name: md.read_text(encoding="utf8")
+            for md in sorted((ROOT / "verification").glob("*.md"))}
+    assert docs, "no verification/*.md to read"
+    quoted = [(name, line) for name, text in docs.items() for line in text.splitlines()
+              if line.startswith("- the matched map is also judged on what it misses:")]
+    assert quoted, "the answer key stopped quoting the `soc.coverage` row"
+    for name, line in quoted:
+        assert "…" not in line, f"{name}: a generated claim was cut short: {line[-60:]}"
+        # the two endings this row can have; anything else means the document stopped
+        # quoting the engine and started summarising it
+        assert line.rstrip().endswith(("this one does not", "not evidence of a wrong part")), \
+            f"{name}: the coverage claim does not end where the tool ends it: {line[-70:]}"
+    for name, text in docs.items():
+        for line in text.splitlines():
+            assert not line.rstrip().endswith("…"), f"{name}: a line ends on a cut: {line[-60:]}"
+
+
 @contextlib.contextmanager
 def _clean_argv():
     """The checker reads argv; a test must not inherit pytest's."""

@@ -93,7 +93,7 @@ one of them.
   map, and the map is what bytes determine.  Every candidate row keeps that in `unknowns`.
 - here no map has exclusive constants, so the report names the closest installed
   map at reduced confidence and says the databases cannot separate these parts.
-- the matched map is also judged on what it misses: 29 device address(es) reached by decoded instructions are not in stm32f427xx's map (65 accesses, e.g. 0x40012304, 0x40025FC4, 0x40025FD8, 0x42470000, 0x42470060, 0x40003840); 1 of them ARE in stm32h74…
+- the matched map is also judged on what it misses: 29 device address(es) reached by decoded instructions are not in stm32f427xx's map (65 accesses, e.g. 0x40012304, 0x40025FC4, 0x40025FD8, 0x42470000, 0x42470060, 0x40003840); 1 of them ARE in stm32h743xx (most under stm32h743xx) - another installed map sees hardware this one does not
   (`soc.coverage`, confidence 0.6, contested addresses: 1)
 - carving proves a constant is present, not that code executed an access: those rows are
   labelled `carve/1` and never claim a direction.  `peripheral.access` rows come only

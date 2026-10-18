@@ -96,7 +96,7 @@ one of them.
   4 device constant(s) no other installed map can see.  The identical test on
   the `openmv2` sample (verification/openmv2.md) explains 0, which is why
   that report says so instead of naming a part on a coin flip.
-- the matched map is also judged on what it misses: 9 device address(es) reached by decoded instructions are not in stm32f765xx's map (37 accesses, e.g. 0x40012304, 0x80000002, 0xB60B60B7, 0x40025FC4, 0x40025FD8, 0x4264DA0A); no other installed map nam…
+- the matched map is also judged on what it misses: 9 device address(es) reached by decoded instructions are not in stm32f765xx's map (37 accesses, e.g. 0x40012304, 0x80000002, 0xB60B60B7, 0x40025FC4, 0x40025FD8, 0x4264DA0A); no other installed map names them either, so this is a hole in the databases or a vendor block CMSIS does not define, not evidence of a wrong part
   (`soc.coverage`, confidence 0.45, contested addresses: 0)
 - carving proves a constant is present, not that code executed an access: those rows are
   labelled `carve/1` and never claim a direction.  `peripheral.access` rows come only

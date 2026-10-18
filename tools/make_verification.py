@@ -251,7 +251,11 @@ def build(board: str, other_board: str) -> tuple[str, dict]:
         L += ["- here no map has exclusive constants, so the report names the closest installed",
               "  map at reduced confidence and says the databases cannot separate these parts."]
     if gap:
-        L += [f"- the matched map is also judged on what it misses: {gap['summary'][:200]}…",
+        # This used to be `{gap['summary'][:200]}…`.  A 200-char window cut the sentence in
+        # half -- "...another installed map sees hardware this one does not" was the part that
+        # got dropped on openmv2 -- and the answer key is the one place a reader is supposed
+        # to be able to check a claim in full.  The line is long; it is the whole claim.
+        L += ["- the matched map is also judged on what it misses: " + gap["summary"],
               f"  (`soc.coverage`, confidence {gap['confidence']}, contested addresses: "
               f"{gap['metrics']['contested']})"]
     L += [
