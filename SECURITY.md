@@ -27,6 +27,15 @@ image is untrusted data and people point analysis tools at samples from stranger
   repository are in `tools/get_sample.py` and `tools/gen_socdb.py`, both of which fetch
   from a hardcoded HTTPS host, pin an expected sha256, and refuse on mismatch.
   Neither runs during `scan`.
+- **The answer key is fetched from an immutable tag.**  `tools/get_sample.py` downloads one
+  release asset (`v5.0.1`), checks the archive against a pinned sha256 *before* unpacking,
+  then checks every file it writes against its own pin, and exits non-zero instead of
+  substituting.  That is a security property, not a convenience: this repository's whole
+  claim is that its verification numbers are reproducible, and a build artifact republished
+  under a moving name is a supply chain that silently replaces the evidence.  It used to read
+  OpenMV's rolling `development` asset and print a note when the digest differed; on
+  2026-10-18 the asset moved, CI scanned different bytes than the documents describe, and the
+  failure looked like stale documentation.
 - **Nothing is written except the report you asked for.**  `--json` and `--md` take an
   explicit path; there is no cache directory, no telemetry, no crash reporter.
 

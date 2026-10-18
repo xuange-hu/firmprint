@@ -9,7 +9,7 @@ about.
 python tools/get_sample.py --board OPENMV2   # 6 files, pinned by sha256
 ```
 
-We will scan `firmware.bin`: 790,416 bytes, sha256 `7b7fca163c0a266f…`.  It is the
+We will scan `firmware.bin`: 783,076 bytes, sha256 `7aa2b5364d124e3b…`.  It is the
 application half of OpenMV2's flash, and it carries **no** ELF wrapper, no section
 headers, no program headers, no symbol table, and no link address.  A `strings`-and-grep
 pass on it finds nothing that says "STM32".
@@ -20,24 +20,27 @@ pass on it finds nothing that says "STM32".
 
 ```
 $ firmprint scan samples/openmv2/firmware.bin
-file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f…
+file        firmware.bin  783,076 B  sha256:7aa2b5364d124e3b…
 container   raw / arm  1 segment(s)  entry -
-            raw dump: no container header. load base inferred as 0x08010000: of the 16
-            origins tested it is the one whose best candidate reads most like a vector
-            table (1 table(s) there, the first at file offset 0x0); origins that also
-            produced tables: 0x08000000(1). Pass --base to pin it.
+            raw dump: no container header. load base inferred as 0x08010000: of the 16 origins
+            tested it is the one whose best candidate reads most like a vector table (1 table(s)
+            there, the first at file offset 0x0); every other tested origin produced no table; 11 of
+            the 19 origins its own handler words proposed were not shape-tested, a cap on work and
+            not a verdict on them. Pass --base to pin it.
 ```
 
 The base is not looked up and not guessed from a linker script — it is *proposed by the
 image itself*.  A Cortex-M vector table holds absolute code addresses, and every handler
 in a flash-resident image has its own link address in its high bits, so the reset targets
-in the file vote for candidate origins (`reset & ~0xFFFF`).  Sixteen candidates were
-tested; two of them produced a table; `0x08010000` produced the best-shaped one, at file
-offset 0x0.
+in the file vote for candidate origins (`reset & ~0xFFFF`).  Sixteen of the nineteen origins
+this file proposes were shape-tested -- the note prints both numbers -- and one produced a
+table, at file offset 0x0.  The rest of the story, including what happens when the cap
+throws away the right answer, is [case-openmv3.md](case-openmv3.md) §1.
 
 The true application link address for an OpenMV2 build is `0x08010000`: the firmware sits
-above a 64 KB USB bootloader at `0x08000000`.  The inference is right, and the report
-names the runner-up instead of hiding it.
+above a 64 KB USB bootloader at `0x08000000`.  The inference is right, and when a second
+origin does produce a table the report names it rather than hiding it -- the merged image
+in §6 prints `origins that also produced tables: 0x08010000(1)` for exactly that reason.
 
 ## 2. The vector table
 
@@ -45,21 +48,21 @@ names the runner-up instead of hiding it.
 {
  "kind": "cortex-m.vector_table",
  "subject": "table@0x08010000",
- "confidence": 0.849,
+ "confidence": 0.855,
  "rule": "cortex-m.vector_table.shape",
  "engine": "vectors/1",
- "summary": "vector table at 0x08010000: 98 live handlers within 131 scanned slots (8 zeroed, 25 non-code), initial MSP 0x1000F958, reset handler 0x080101AD; 76 distinct targets, unused slots are aliased to a default handler; the scan stopped after 24 unused slots, so the live count is a lower bound",
+ "summary": "vector table at 0x08010000: 98 live handlers within 131 scanned slots (8 zeroed, 25 non-code), initial MSP 0x1000F948, reset handler 0x080101AD; 76 distinct targets, unused slots are aliased to a default handler; the scan stopped after 24 unused slots, so the live count is a lower bound",
  "evidence": [
   {"kind": "bytes", "note": "initial MSP + reset vector (little endian)",
-   "file_offset": 0, "vaddr": "0x08010000", "bytes": "58f90010ad010108"},
+   "file_offset": 0, "vaddr": "0x08010000", "bytes": "48f90010ad010108"},
   {"kind": "bytes", "note": "following handler entries",
    "file_offset": 8, "vaddr": "0x08010008",
-   "bytes": "532407084124070855240708652407087524070800000000"}
+   "bytes": "7f4a08086d4a0808814a0808914a0808a14a080800000000"}
  ]
 }
 ```
 
-Read the evidence byte string as two little-endian words: `0x1000F958` and `0x080101AD`.
+Read the evidence byte string as two little-endian words: `0x1000F948` and `0x080101AD`.
 The first is where the stack starts — inside the F4's *CCM* RAM at `0x10000000`, not the
 main SRAM at `0x20000000`, which is exactly what an ST application using the DMA-capable
 `0x2000` SRAM plus CCM would do.  The second is the reset handler.
@@ -90,7 +93,7 @@ map and invisible to the other — the F4 and the F7 share their peripheral wind
 entirely, so **no constant in this file can separate them**.  The report says that in the
 match line itself, not in a footnote.
 
-What does separate them is the memory *organisation*: the initial MSP `0x1000F958` sits
+What does separate them is the memory *organisation*: the initial MSP `0x1000F948` sits
 inside an F4 CCM window (`0x10000000`) that the F7's CMSIS header does not declare, and
 the tie is broken there — with a 0.66 confidence and this caveat attached:
 
@@ -106,7 +109,7 @@ boards, two honest answers, no hand-picked win.
 
 The third row is also instructive.  `stm32h743xx` explains 45 of the 89 and owns exactly
 one constant the others cannot see, `0x52002020`, which its map calls `FLASH_R + 0x20`
-(`OPTSR_PRG`).  Go looking: at file offset `0x98D18` those four bytes are `20 20 00 52` —
+(`OPTSR_PRG`).  Go looking: at file offset `0x9DF5C` those four bytes are `20 20 00 52` —
 the tail of the ASCII string `"R0    "` inside the HardFault register dump
 
 ```
@@ -121,15 +124,16 @@ third at 0.433.
 
 ## 4. What the code actually touches
 
-107 findings, of which 93 carry peripheral evidence.  The 11 `peripheral.access` rows are
+112 findings, of which 98 carry peripheral evidence.  The 16 `peripheral.access` rows are
 the strong ones, because each quotes a decoded instruction:
 
 ```
-peripheral.access  RCC   0.86  RCC: 182 decoded load/store(s) through a tracked base
-                               register; AHB1ENR/read=21, APB1ENR/read=18, CFGR/read=18,
-                               CR/read=16, AHB1ENR/write=11, CR/write=10, CFGR/write=10,
-                               APB1ENR/write=10; … 19 more register/direction pair(s) not
-                               listed, 68 access(es) among them
+peripheral.access  RCC   0.86  RCC: 294 decoded load/store(s) through a tracked base
+                               register; APB1ENR/read=51, APB1ENR/write=24, CFGR/read=22,
+                               AHB1ENR/read=21, APB2ENR/read=21, CR/read=20,
+                               APB1RSTR/read=20, APB1RSTR/write=20; … 21 more
+                               register/direction pair(s) not listed, 95 access(es) among
+                               them
 
   evidence  0x080101AE  ldr r3, [r0]  [read]  reached 0x40023830 -> RCC+0x030 (AHB1ENR)
             file offset 430, bytes 0368
@@ -143,14 +147,14 @@ the tool memorised.
 ```
 peripheral.access  DCMI  0.86  DCMI: 6 decoded load/store(s) through a tracked base
                                register; CR/read=4, CR/write=2
-  evidence  0x080465AC  ldr r2, [r3]  [read]  reached 0x50050000 -> DCMI+0x000 (CR)
+  evidence  0x080464E4  ldr r2, [r3]  [read]  reached 0x50050000 -> DCMI+0x000 (CR)
 ```
 
 That one matters more than it looks.  `0x5005_0000` is the F4's camera interface, sitting
 in the AHB2 peripheral window — an address a *whole class* of heuristics never sees,
 because the usual shortcut is "constants near 0x4000_0000 are peripherals".  Here a base
 register was tracked through a literal pool into an `LDR` from `[r3]`, and the block
-resolved to `DCMI+0x000 (CR)` at `0x080465AC`, 217 KB into the dump.
+resolved to `DCMI+0x000 (CR)` at `0x080464E4`, 217 KB into the dump.
 
 The 81 `peripheral.usage` rows are the weaker, stdlib-only tier:
 
@@ -166,12 +170,13 @@ the finding rather than a footer.  `--no-code` gives you exactly these 81 and no
 ## 5. What the report refuses to claim
 
 ```
-soc.coverage  stm32f427xx  0.45  27 device address(es) reached by decoded instructions
-                                  are not in stm32f427xx's map (61 accesses, e.g.
-                                  0x40012304, 0x40025FC4, 0x40025FD8, 0x42470060, …);
-                                  no other installed map names them either, so this is a
-                                  hole in the databases or a vendor block CMSIS does not
-                                  define, not evidence of a wrong part
+soc.coverage  stm32f427xx  0.45  36 device address(es) reached by decoded instructions
+                                  are not in stm32f427xx's map (72 accesses, e.g.
+                                  0x40012304, 0x40025FC4, 0x40025FD8, 0x42470000,
+                                  0x42470060, …); no other installed map names them
+                                  either, so this is a hole in the databases or a vendor
+                                  block CMSIS does not define, not evidence of a wrong
+                                  part
 ```
 
 The matched map is scored on its *misses*, not just its hits — and a miss is only allowed
@@ -180,10 +185,10 @@ so the row is filed as a coverage gap.  It also shows the tool knowing when it h
 had: `0x42470060` is not a peripheral on any STM32; it is a mispaired `MOVW`/`MOVT`, and
 the `unknowns` say that rather than listing it as hardware.
 
-The other refusals in this run: one high-entropy block at `0x080B7000` (7.996 bits/byte)
-reported as "encrypted or compressed payload" with the caveat that entropy cannot
-distinguish TLS-terminated OTA from plain deflate; and 49 strings that read as identity
-hints, led by `0x080A6619` — `; OPENMV2 with STM32F427`.
+The other refusals in this run: two high-entropy blocks, `0x080B7000` (7.995 bits/byte) and
+`0x080B8000` (7.961), reported as "encrypted or compressed payload" with the caveat that
+entropy cannot distinguish TLS-terminated OTA from plain deflate; and 49 strings that read
+as identity hints, led by `0x080A4CAF` — `; OPENMV2 with STM32F427`.
 
 ## 6. Cross-checks, from evidence the tool did not produce
 
@@ -194,7 +199,7 @@ family per driven peripheral, decided at link time, never given to firmprint as 
 ```
 $ firmprint verify samples/openmv2/firmware.elf
 - matched part stm32f427xx; 81 peripheral block(s) with address evidence;
-  202,041 instructions decoded
+  202,077 instructions decoded
 - oracle: 14 driver module(s) named by the image's own symbols
 - confirmed 14/14 (recall 100%) over driver-linked peripherals
 …
@@ -207,7 +212,7 @@ further blocks were reported that the oracle has no name for (ETH, SDIO, RNG, SA
 streams, CRC, DAC…); those are *not* counted as false positives, because the oracle is
 blind to direct register writes, and each row still carries its own offsets and bytes.
 
-**The build banner.**  `; OPENMV2 with STM32F427` at `0x080A6619` — embedded by OpenMV's
+**The build banner.**  `; OPENMV2 with STM32F427` at `0x080A4CAF` — embedded by OpenMV's
 own build, naming the part.  Independent of every address heuristic above.
 
 **The bootloader.**  `bootloader.elf` has a real ELF entry point: `0x08004215`.  Scan the
@@ -215,7 +220,7 @@ merged release image and the tool finds two vector tables in one file:
 
 ```
 $ firmprint scan samples/openmv2/openmv.bin
-table@0x08010000  conf 0.849  98 live handlers  MSP 0x1000F958  reset 0x080101AD
+table@0x08010000  conf 0.855  98 live handlers  MSP 0x1000F948  reset 0x080101AD
 table@0x08000000  conf 0.734  98 live handlers  MSP 0x100057F0  reset 0x08004215
 ```
 

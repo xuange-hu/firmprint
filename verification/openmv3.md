@@ -5,7 +5,16 @@ repository ships an answer key instead of a promise.  Every number below was pro
 by `python tools/make_verification.py openmv3` against MIT-licensed OpenMV firmware —
 no figure is typed in by hand.
 
-- image: `firmware.elf`, 10,464,140 bytes, sha256 `c3907f8c1def1c1ba1d3699c7218a9730043f96298c9cd86cc5d50c19c8b38f7`
+- source: OpenMV release `v5.0.1`, asset `firmware_v5.0.1.zip` (sha256 `1338b9607b57d88cf1de5aee115ea0e18cb17d06ff4d8dc55d6c022dba66dbc8`), fetched by `python tools/get_sample.py --all`
+- image: `firmware.elf`, 10,359,956 bytes, sha256 `97e6d7a61947a48d4e367f703f26c66a46cd28b132c8395bc7c0a3a3ae38fbed`
+- image: `firmware.bin`, 1,627,648 bytes, sha256 `740c1b35e712c9bd1430e59eed86e60c36ff662ca383933309d3c9cfb83496c1`
+- image: `openmv.bin`, 1,758,720 bytes, sha256 `d97151055649f737b4b9cc1fa0edf0f5f9c3afd439cb1ac87e6591e9ae51cd03`
+
+Three views of the same board: the ELF carries symbols (the oracle reads them),
+the raw flash image is what a confiscation bag actually contains, and the merged
+release image is what OpenMV ships to the device.  `tools/get_sample.py` pins all
+three by sha256, and the doc gate fails if the bytes on disk are not these.
+
 - vendor part: **STM32F765VGT6**, confirmed by the banner string the build embedded: `OPENMV3 with STM32F765`
 - firmprint answer: **stm32f765xx** (f7, cortex-m7) from `STMicroelectronics/cmsis-device-f7` header sha256 `31fb8b970e795b41...`
 - evidence-contract violations: **0**
@@ -17,7 +26,7 @@ The oracle is the image's own symbol table: ST's Hardware Abstraction Layer link
 driver code present.  firmprint never sees that mapping as input — it reads 32-bit
 constants and Thumb-2 instructions and derives blocks from addresses.
 
-- instructions decoded: 194,240 (32% of code, 2374 functions)
+- instructions decoded: 196,263 (32% of code, 2793 functions)
 - driver-linked modules: **15**, confirmed by firmprint: **15/15** (recall 100%)
 
 | oracle module | linked symbols | firmprint block(s) | status | engine(s) |
@@ -31,7 +40,7 @@ constants and Thumb-2 instructions and derives blocks from addresses.
 | RCC | 6 | RCC | OK | capstone/5.0.9, carve/1 |
 | ADC | 5 | ADC1, ADC2, ADC3 | OK | capstone/5.0.9, carve/1 |
 | CAN | 5 | CAN1, CAN2 | OK | capstone/5.0.9, carve/1 |
-| RTC | 5 | RTC | OK | carve/1 |
+| RTC | 5 | RTC | OK | capstone/5.0.9, carve/1 |
 | GPIO | 4 | GPIOA, GPIOB, GPIOC, GPIOD, GPIOE, GPIOF, GPIOG, GPIOH, GPIOI, GPIOJ, GPIOK | OK | capstone/5.0.9, carve/1 |
 | FLASH | 3 | FLASH_R | OK | capstone/5.0.9, carve/1 |
 | PWR | 3 | PWR | OK | capstone/5.0.9, carve/1 |
@@ -71,13 +80,13 @@ one of them.
 
 | image | table | confidence | live handlers | slots | initial MSP | reset |
 |---|---|---|---|---|---|---|
-| firmware.elf | table@0x08020000 | 0.865 | 115 | 150 | 0x00004000 | 0x080201F9 |
-| firmware.bin | table@0x08020000 | 0.865 | 115 | 150 | 0x00004000 | 0x080201F9 |
-| openmv.bin | table@0x08020000 | 0.865 | 115 | 150 | 0x00004000 | 0x080201F9 |
+| firmware.elf | table@0x08020000 | 0.871 | 115 | 150 | 0x00004000 | 0x080201F9 |
+| firmware.bin | table@0x08020000 | 0.871 | 115 | 150 | 0x00004000 | 0x080201F9 |
+| openmv.bin | table@0x08020000 | 0.871 | 115 | 150 | 0x00004000 | 0x080201F9 |
 | openmv.bin | table@0x08000000 | 0.764 | 115 | 150 | 0x20005848 | 0x080042B9 |
 
 - merged image base inference: 0x08000000 (correct: the bootloader is at 0x08000000)
-- what the inference said out loud: raw dump: no container header. load base inferred as 0x08000000: of the 17 origins tested it is the one whose best candidate reads most like a vector table (2 table(s) there, the first at file offset 0x0); origins that also produced tables: 0x08010000(1), 0x08020000(1). Pass --base to pin it.
+- what the inference said out loud: raw dump: no container header. load base inferred as 0x08000000: of the 16 origins tested it is the one whose best candidate reads most like a vector table (2 table(s) there, the first at file offset 0x0); origins that also produced tables: 0x08010000(1); 31 of the 40 origins its own handler words proposed were not shape-tested, a cap on work and not a verdict on them. Pass --base to pin it.
 
 ## 4. What it refuses to claim
 
@@ -87,14 +96,17 @@ one of them.
   4 device constant(s) no other installed map can see.  The identical test on
   the `openmv2` sample (verification/openmv2.md) explains 0, which is why
   that report says so instead of naming a part on a coin flip.
-- the matched map is also judged on what it misses: 11 device address(es) reached by decoded instructions are not in stm32f765xx's map (39 accesses, e.g. 0x40012304, 0x80000002, 0xB60B60B7, 0x40025FC4, 0x40025FD8, 0x46314640); no other installed map na…
+- the matched map is also judged on what it misses: 9 device address(es) reached by decoded instructions are not in stm32f765xx's map (37 accesses, e.g. 0x40012304, 0x80000002, 0xB60B60B7, 0x40025FC4, 0x40025FD8, 0x4264DA0A); no other installed map nam…
   (`soc.coverage`, confidence 0.45, contested addresses: 0)
 - carving proves a constant is present, not that code executed an access: those rows are
   labelled `carve/1` and never claim a direction.  `peripheral.access` rows come only
   from the capstone engine and quote instruction bytes.
 - register names resolve only where CMSIS gives the block a struct; an offset inside a
   struct hole reports as the block base rather than an invented register.
-- runtimes: ELF 1.78s, raw 1.8s, merged 2.38s (3.12.10 / windows).
+- this document is generated, and re-running the generator has to leave it byte-identical:
+  every number in it is a property of the image and of this tool.  Wall-clock timings and
+  the interpreter that produced them used to be printed here, which made "no diff" true
+  on one machine only; they are reported on stdout instead.
 
 ## Reproduce
 

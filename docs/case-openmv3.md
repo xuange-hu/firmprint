@@ -8,7 +8,7 @@ tool can be *wrong* about a tie and notice.
 python tools/get_sample.py --board OPENMV3   # 6 files, pinned by sha256
 ```
 
-`firmware.bin`: 1,635,112 bytes, sha256 `f6c41e63f19591d0…`, no container metadata.
+`firmware.bin`: 1,627,648 bytes, sha256 `740c1b35e712c9bd…`, no container metadata.
 
 ---
 
@@ -16,19 +16,31 @@ python tools/get_sample.py --board OPENMV3   # 6 files, pinned by sha256
 
 ```
 $ firmprint scan samples/openmv3/firmware.bin
-file        firmware.bin  1,635,112 B  sha256:f6c41e63f19591d0…
+file        firmware.bin  1,627,648 B  sha256:740c1b35e712c9bd…
 container   raw / arm  1 segment(s)  entry -
             raw dump: no container header. load base inferred as 0x08020000: of the 17 origins
             tested it is the one whose best candidate reads most like a vector table (1 table(s)
-            there, the first at file offset 0x0); origins that also produced tables: 0x08000000(1),
-            0x08010000(2). Pass --base to pin it.
+            there, the first at file offset 0x0); origins that also produced tables: 0x08000000(1);
+            30 of the 39 origins its own handler words proposed were not shape-tested, a cap on work
+            and not a verdict on them. Pass --base to pin it.
 match       stm32f765xx (f7, cortex-m7)  conf 0.76  best match
 ```
 
 `0x08020000` is the true application base: OpenMV3 puts a **128 KB** bootloader in front
-of the firmware where OpenMV2 used 64 KB, and the proposal set (`reset & ~0xFFFF` over
-every handler in the file) is where both numbers show up.  Seventeen origins were tested,
-three produced tables, one won.
+of the file where OpenMV2 used 64 KB, and the proposal set (`reset & ~0xFFFF` over every
+handler in the file) is where that number comes from.  This dump proposes 39 origins; 17
+were shape-tested, two produced a table, one won.
+
+The cap is where this sample earned its keep.  With `v5.0.1` pinned, the true
+`0x08020000` turned out to be the *least-voted* proposal in the file -- one vote, against
+six origins that the constant pool votes for twice each -- so the top-six list dropped it,
+the shape test never ran on the right address, and the scan confidently reported
+`0x08000000` with a 21-handler accident at `0x08174480` as the table.  Nothing was wrong
+with the shape test; the candidate list it was fed had lost the answer.  The first eight
+bytes are now always tested, whatever their vote count, because that word pair is the one
+place a Cortex-M table is defined to sit in a dump that begins at its own flash base -- and
+the note above now says how many proposed origins were never shape-tested, because "17
+tested" was only ever half the truth.  `tests/test_vectors.py` pins both halves.
 
 ## 2. A stack pointer that looked like a bug
 
@@ -36,11 +48,11 @@ three produced tables, one won.
 {
  "kind": "cortex-m.vector_table",
  "subject": "table@0x08020000",
- "confidence": 0.865,
+ "confidence": 0.871,
  "summary": "vector table at 0x08020000: 115 live handlers within 150 scanned slots (10 zeroed, 25 non-code), initial MSP 0x00004000, reset handler 0x080201F9; 78 distinct targets, unused slots are aliased to a default handler; the scan stopped after 24 unused slots, so the live count is a lower bound",
  "metrics": {
   "msp": "0x00004000", "reset": "0x080201F9", "n_live": 115, "n_scanned": 150,
-  "unique_handlers": 78, "monotone_ratio": 0.544, "slot_density": 0.767
+  "unique_handlers": 78, "monotone_ratio": 0.57, "slot_density": 0.767
  }
 }
 ```
@@ -137,12 +149,17 @@ H7 a contender for both boards.
 ## 4. What the code touches, and what it is not
 
 ```
-peripheral.access  RCC     0.86  RCC: 265 decoded load/store(s) through a tracked base
-                                 register; DCKCFGR2/read=25, AHB1ENR/read=23, …
+peripheral.access  RCC     0.86  RCC: 306 decoded load/store(s) through a tracked base
+                                 register; APB1ENR/read=39, DCKCFGR2/read=27, CR/read=24,
+                                 CFGR/read=23, AHB1ENR/read=21, APB1ENR/write=19,
+                                 CR/write=18, DCKCFGR2/write=18; … 21 more
+                                 register/direction pair(s) not listed, 117 access(es)
+                                 among them
 peripheral.access  DMA1    0.86  DMA1: 26 decoded load/store(s) through a tracked base
                                  register; HIFCR/write=13, LIFCR/write=13
-peripheral.access  FLASH_R 0.86  FLASH_R: 62 decoded load/store(s) …; CR/read=21,
-                                 CR/write=20, ACR/…
+peripheral.access  FLASH_R  0.86  FLASH_R: 62 decoded load/store(s) through a tracked base
+                                 register; CR/read=21, CR/write=20, ACR/read=8, SR/read=7,
+                                 ACR/write=4, SR/write=2
 peripheral.usage   GPIOA   0.82  GPIOA @0x40020000 referenced 22 times as an address
                                  constant; registers seen: MODER(22)
 ```
@@ -150,17 +167,24 @@ peripheral.usage   GPIOA   0.82  GPIOA @0x40020000 referenced 22 times as an add
 `DCKCFGR2` is the register that does not exist on the F4 at all: its RCC struct ends at
 `DCKCFGR` (25 fields), the F7's continues to `DCKCFGR1` and `DCKCFGR2`.  The name came out
 of the database, not out of a pattern the tool memorised.
-`HIFCR/write=13, LIFCR/write=13` on both DMA controllers is the interrupt-flag clear
-pattern; the direction is a decoded `STR`, not an assumption.
+`HIFCR/write=13, LIFCR/write=13` on DMA1 is the interrupt-flag clear pattern; the direction
+is a decoded `STR`, not an assumption.
 
-Eighty-eight peripheral blocks carry address evidence in this run, 117 findings in total,
-0 contract violations.  Two of the rows are deliberately *not* presented as peripherals:
+Eighty-eight peripheral blocks carry address evidence in this run, 119 findings in total,
+0 contract violations.  The tiers stay apart: the 14 `peripheral.access` rows quote a
+decoded instruction, the 88 `peripheral.usage` rows quote only the constant, and 9 rows are
+`memory.reference` — device-shaped words that land in a memory window rather than in a
+peripheral block.  Two of those nine:
 
 ```
-memory.reference  RAMDTCM   RAMDTCM @0x20000000 referenced 26 times as an address
-                            constant; no CMSIS register struct: this is a memory or
-                            bit-band window, so no register names are claimed
-memory.reference  UID       UID @0x1FF0F420 referenced 1 time as an address constant
+memory.reference  RAMDTCM  0.82  RAMDTCM @0x20000000 referenced 26 times as an address
+                                 constant; no CMSIS register struct: this is a memory or
+                                 bit-band window, so it is reported as a memory reference;
+                                 (block base)(26)
+memory.reference  UID      0.55  UID @0x1FF0F420 referenced 1 time as an address constant;
+                                 no CMSIS register struct: this is a memory or bit-band
+                                 window, so it is reported as a memory reference;
+                                 (block base)(1)
 ```
 
 `UID` — the 96-bit device identifier — is a *place*, and `carve/1` proves the word is in
@@ -173,7 +197,7 @@ region and nothing about what was read from it.
 soc.coverage  stm32f765xx  0.45  14 device address(es) reached by decoded instructions
                                   are not in stm32f765xx's map (42 accesses, e.g.
                                   0x40012304, 0x80000002, 0xB60B60B7, 0x40025FC4,
-                                  0x40025FD8, 0x46314640); no other installed map names
+                                  0x40025FD8, 0x4264DA0A); no other installed map names
                                   them either, so this is a hole in the databases or a
                                   vendor block CMSIS does not define, not evidence of a
                                   wrong part
@@ -185,7 +209,8 @@ of a `MOVW` with a `MOVT` was guessed wrong by a flow-insensitive scan — the n
 rather than promoting it to hardware.  `0x40012304` is more interesting than the junk.  The F7 map has a block at
 `0x4001_2300` — the shared ADC front end — and CMSIS gives that struct exactly **4 bytes**,
 so offset `+4` is one word past a hole in ST's own header.  Code really did reach it
-(`str` with a tracked base), the block really is ADC, and the register has no name.
+(`ldr r1, [r2, #4]` through a tracked base at `0x080203D4`), the block really is ADC, and
+the register has no name.
 That is a gap in the database, not a wrong part, which is why the row sits at 0.45 and
 says so.  The same rule covers `MDIOS @0x40017800` in §4, reported as `(block base)`
 instead of an invented register.
@@ -202,28 +227,33 @@ on this row would jump to 0.6 rather than stay at 0.45.
 ```
 $ firmprint verify samples/openmv3/firmware.elf
 - matched part stm32f765xx; 88 peripheral block(s) with address evidence;
-  194,240 instructions decoded
+  196,263 instructions decoded
 - oracle: 15 driver module(s) named by the image's own symbols
 - confirmed 15/15 (recall 100%) over driver-linked peripherals
 contract: 0 violation(s)
 ```
 
 I2C (32 linked symbols), TIM (31), SPI (24), DCMI (14), DMA2D (10), DMA (7), RCC (6),
-ADC/CAN/RTC (5 each), GPIO (4), FLASH/PWR/CRC (3 each), UART (2).  RTC's row is confirmed
-by `carve/1` alone — the constant is there, the decoded access was not reached inside the
-byte budget, and the report keeps that distinction instead of rounding it up.  33 blocks
-were reported that the oracle cannot name (SAI2, SPDIFRX, MDIOS, LPTIM1, QSPI_R, the DMA
-streams, ETH, CAN3…); not counted as false positives, because the oracle is blind to
-direct register writes, and every one carries its own offsets.
+ADC/CAN/RTC (5 each), GPIO (4), FLASH/PWR/CRC (3 each), UART (2).  Every one of those 15
+modules is confirmed by both engines, `capstone/5.0.9, carve/1`: the constant is physically
+in the image *and* a decoded instruction reaches the block.  The two tiers are not
+decoration -- `peripheral.usage` quotes the constant alone and never borrows a read/write
+direction from a neighbour -- so the engine column of the per-module table in
+[verification/openmv3.md](../verification/openmv3.md) is the provenance of each "OK", not a
+footer.
 
-**The build banner.** `; OPENMV3 with STM32F765` at `0x0817A666`, plus `OpenMV3-M7` —
+33 blocks were reported that the oracle cannot name (SAI2, SPDIFRX, MDIOS, LPTIM1, QSPI_R,
+the DMA streams, ETH, CAN3…); not counted as false positives, because the oracle is blind
+to direct register writes, and every one carries its own offsets.
+
+**The build banner.** `; OPENMV3 with STM32F765` at `0x08178C7F`, plus `OpenMV3-M7` —
 strings embedded by OpenMV's own build system, independent of every address heuristic in
 this document.
 
 **The merged image.** `openmv.bin` carries both halves, and the scan reports both:
 
 ```
-table@0x08020000  conf 0.865  115 live  MSP 0x00004000  reset 0x080201F9   (application)
+table@0x08020000  conf 0.871  115 live  MSP 0x00004000  reset 0x080201F9   (application)
 table@0x08000000  conf 0.764  115 live  MSP 0x20005848  reset 0x080042B9   (bootloader)
 
 container note: more than one vector table: this is probably a merged image
@@ -245,8 +275,9 @@ peripheral blocks; `verification/openmv3.md` §2 checks that automatically.
 
 The F765 case looks like the easy win — right part, 15/15, a clean four-constant margin.
 It is the harder one.  It produced a wrong RAM judgement that quietly demoted the correct
-map, it produced an "exclusive constant" that turned out to be ASCII, and it produced 42
-decoded accesses to addresses no vendor map names.  All three are in the tool now as
+map, it produced an "exclusive constant" that turned out to be ASCII, it produced 42
+decoded accesses to addresses no vendor map names, and re-pinning its bytes produced a
+candidate list that had thrown away the right load base.  All four are in the tool now as
 *published numbers with a rule attached*, because the only version of this story worth
 putting in a repository is the one where the sample was allowed to disagree with the
 answer.

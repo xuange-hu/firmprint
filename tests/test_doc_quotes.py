@@ -24,15 +24,19 @@ import pytest
 from conftest import ROOT
 
 
-def _load_checker():
+def _load_module(name, path):
     """Checkout-only: a wheel does not ship `tools/`."""
-    script = ROOT / "tools" / "check_doc_quotes.py"
-    if not script.exists():
-        pytest.skip("the checker lives in the repository checkout", allow_module_level=True)
-    spec = importlib.util.spec_from_file_location("check_doc_quotes", script)
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_checker():
+    script = ROOT / "tools" / "check_doc_quotes.py"
+    if not script.exists():
+        pytest.skip("the checker lives in the repository checkout", allow_module_level=True)
+    return _load_module("check_doc_quotes", script)
 
 
 chk = _load_checker()
@@ -341,6 +345,176 @@ def test_the_test_count_in_the_readme_is_the_number_pytest_collects():
     assert claimed, "README no longer spells a test count the way this test can read it"
     assert claimed == {str(collected)}, (
         f"README claims {sorted(claimed)} tests, the suite collects {collected}")
+
+
+def test_the_answer_keys_digest_line_is_the_one_the_gate_reads(tmp_path):
+    """`verification/<board>.md` names the bytes it was generated from; the gate reads it.
+
+    The parse is the whole of the "did the samples move?" check, so it is pinned against the
+    exact sentence the generator writes -- and against a missing directory, which must yield
+    no claims rather than a crash or a false pass.
+    """
+    v = tmp_path / "verification"
+    v.mkdir()
+    (v / "openmv2.md").write_text(
+        "# Verification: openmv2 (STM32F427VGT6)\n"
+        "\n"
+        "- image: `firmware.elf`, 7,670,672 bytes, sha256 `" + "a" * 64 + "`\n"
+        "- vendor part: **STM32F427VGT6**\n", encoding="utf8")
+    assert chk.described_build(v) == {"openmv2/firmware.elf": "a" * 64}
+    assert chk.described_build(tmp_path / "no-such-directory") == {}
+
+
+def test_a_digest_the_generator_writes_is_a_digest_the_gate_can_read(tmp_path):
+    """Two files share one line format, and only a synthetic round trip proves it.
+
+    `make_verification.py` writes the promise and `check_doc_quotes.py` reads it back; the
+    end-to-end equality test needs the firmware, so it can say *whether* the digests match but
+    never whether either side parses the other's syntax.  Change one writer alone and the gate
+    silently compares nothing -- the failure this repository keeps paying for, in the specific
+    form of a green run that checked no bytes.
+    """
+    mk = _load_module("make_verification_quote_test", ROOT / "tools" / "make_verification.py")
+    rep = {"meta": {"file": {"size": 790_416, "sha256": "d" * 64}}}
+    line = mk.image_line(rep, ROOT / "samples" / "openmv2" / "firmware.bin")
+    m = chk.IMAGE_LINE.match(line)
+    assert m, f"the gate cannot parse the generator's own line: {line}"
+    assert (m["name"], m["size"], m["sha"]) == ("firmware.bin", "790,416", "d" * 64)
+    v = tmp_path / "verification"
+    v.mkdir()
+    (v / "openmv2.md").write_text(line + "\n", encoding="utf8")
+    assert chk.described_build(v) == {"openmv2/firmware.bin": "d" * 64}
+
+
+def test_moved_bytes_are_reported_as_moved_bytes_not_as_a_stale_quote():
+    """The distinction this repo paid for on 2026-10-18.
+
+    The runner scanned a build the fetcher had substituted for the pinned one, and the gate
+    said "the prose is stale".  Both statements were true; only one was actionable, and the
+    reader who acted on it would have rewritten correct documentation.
+    """
+    want, got = "b" * 64, "c" * 64
+    assert chk.moved_samples({"openmv2/firmware.elf": got},
+                             {"openmv2/firmware.elf": want}) == [
+        f"  openmv2/firmware.elf: the scanner read sha256 {got[:16]}..., "
+        f"the answer key describes {want[:16]}..."]
+    assert not chk.moved_samples({"openmv2/firmware.elf": want},
+                                 {"openmv2/firmware.elf": want})
+    # an image the answer key says nothing about -- the synthetic blob, say -- is not drift
+    assert not chk.moved_samples({"synthetic/blob.bin": got},
+                                 {"openmv2/firmware.elf": want})
+
+
+def test_a_digest_named_in_a_sentence_is_a_claim_about_bytes():
+    """The case studies open by telling the reader which file to hash; that is checkable.
+
+    Before this, a pasted report line carrying a digest was checked but a paragraph naming one
+    was not -- so the sentence a confused reader follows after a bad download was the least
+    verified digest in the repository.
+    """
+    real = "7b7fca163c0a266f" + "0" * 48
+    digests = {"openmv2/firmware.bin": real}
+    ok = "We will scan `firmware.bin`: 790,416 bytes, sha256 `7b7fca163c0a266f…`.  It is the\n"
+    assert not chk.stale_digests(ok, digests, [], "openmv2")
+    stale = ok.replace("7b7fca163c0a266f", "d6f222ce873ad53e")
+    f, = chk.stale_digests(stale, digests, [], "openmv2")
+    assert "d6f222ce873ad53e" in f and "no scanned image of this board" in f
+    # a prefix is a claim about the whole file, so a prefix is short enough to fail
+    assert len(chk.stale_digests(ok.replace("7b7fca163c0a266f", "7b7fca16"),
+                                 digests, [], "openmv2")) == 0
+    # a digest that exists but belongs to the other board is the mistake this scoping is for
+    other = chk.stale_digests(ok, {"openmv3/firmware.bin": real}, [], "openmv2")
+    assert other and "openmv3" in other[0]
+    # inside a fenced block the paste is a transcript, already checked line by line
+    assert not chk.stale_digests("```\nfile  firmware.bin  sha256:abcdef0123456789\n```\n",
+                                 digests, [], "openmv2")
+    # a header digest is a claim about the database, not about firmware
+    assert not chk.stale_digests("header sha256 `" + "e" * 16 + "`", {}, ["e" * 64], "openmv2")
+    assert chk.header_digests(ROOT / "src" / "firmprint" / "data"), \
+        "the installed database must be able to account for its own headers"
+
+
+def test_every_digest_the_prose_names_is_one_the_fetcher_pins():
+    """Docs and pins have to agree before anyone downloads 91 MB.
+
+    The end-to-end gate compares scanned bytes; this compares the two *promises* -- the
+    digests in the prose and the digests in `tools/get_sample.py` -- so a re-pin that updates
+    one and not the other fails in the dependency-free test job too.  Both sets have to equal
+    the bytes, so agreeing with each other is necessary if not quite sufficient.
+    """
+    gs = _load_module("get_sample_docs", ROOT / "tools" / "get_sample.py")
+    pins = {f"{b.lower()}/{name}": sha
+            for b, (_prefix, _dest, board_pins) in gs.BOARDS.items()
+            for name, sha in board_pins.items()}
+    assert pins, "the fetcher holds no pins: nothing here can be believed"
+    headers = chk.header_digests(ROOT / "src" / "firmprint" / "data")
+    names = sorted(gs.BOARDS)
+    for md in [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]:
+        board = chk.board_of(md, names)
+        for bad in chk.stale_digests(md.read_text(encoding="utf8"), pins, headers, board):
+            pytest.fail(f"{md.name}: {bad}")
+
+
+def test_the_answer_key_refuses_to_describe_unpinned_bytes(monkeypatch, tmp_path):
+    """`source_line()` is the last place that knows which release a document claims.
+
+    Generating a document out of bytes nothing pins produces exactly the artifact this
+    repository just spent an afternoon on: numbers with no way back to the file that made them.
+    """
+    mk = _load_module("make_verification_unpinned", ROOT / "tools" / "make_verification.py")
+    monkeypatch.setattr(mk.fetch, "ASSET_SHA256", "")
+    with pytest.raises(SystemExit, match="no archive digest"):
+        mk.source_line()
+    monkeypatch.setattr(mk.fetch, "ASSET_SHA256", "a" * 64)
+    monkeypatch.setattr(mk.fetch, "BOARDS", {"OPENMV2": ("OPENMV2", tmp_path, {})})
+    with pytest.raises(SystemExit, match="pins no files for OPENMV2"):
+        mk.source_line()
+    monkeypatch.setattr(mk.fetch, "BOARDS",
+                        {"OPENMV2": ("OPENMV2", tmp_path, {"firmware.elf": "b" * 64})})
+    line = mk.source_line()
+    assert line.startswith(f"- source: OpenMV release `{mk.fetch.RELEASE}`")
+    assert f"`{'a' * 64}`" in line and "python tools/get_sample.py --all" in line
+
+
+def test_the_generator_and_the_gate_read_the_same_digest_lines():
+    """Two sides of one contract, checked against the committed answer key.
+
+    `make_verification.py` writes the `- image:` line and this file parses it; either may be
+    edited alone, and the failure only shows up months later as a gate that silently compares
+    nothing.  Every image the answer key quotes has to be named, not just the ELF: a moved
+    `firmware.bin` is exactly as misleading as a moved `firmware.elf`.
+    """
+    described = chk.described_build(ROOT / "verification")
+    assert described, "no verification/*.md to compare against"
+    assert {"openmv2/firmware.elf", "openmv2/firmware.bin", "openmv2/openmv.bin",
+            "openmv3/firmware.elf", "openmv3/firmware.bin", "openmv3/openmv.bin"} \
+        <= set(described)
+    for tag, sha in described.items():
+        assert len(sha) == 64 and not set(sha) - set("0123456789abcdef"), tag
+
+
+def test_the_answer_key_records_nothing_about_the_machine_that_ran_it():
+    """A generated file you cannot reproduce byte for byte is not an answer key.
+
+    `verification/*.md` used to end with `- runtimes: ELF 1.3s, raw 0.86s, … (3.12.10 /
+    windows)`, which made the regeneration diff a *conditional*: CI normalised that line away
+    and the PR template said "produces no diff (beyond the `runtimes:` line)".  An exception
+    written into the definition of a check is a hole in it -- the next runner-dependent number
+    simply joins the list.  A timing describes whoever ran the generator, and the interpreter
+    version with it, so both are printed on stdout instead of being committed.
+    """
+    docs = sorted((ROOT / "verification").glob("*.md"))
+    assert docs, "no verification/*.md to read"
+    for md in docs:
+        text = md.read_text(encoding="utf8")
+        assert not re.search(r"^- runtimes:", text, re.M), f"{md.name}: a timing got committed"
+        assert not re.search(r"\d+\.\d+s\b", text), f"{md.name}: a wall-clock duration survives"
+        assert not re.search(r"\d+\.\d+\.\d+ / (windows|linux|darwin)", text), \
+            f"{md.name}: the runner's interpreter and OS are not facts about the firmware"
+    # and the generator still has to say something instead: the line it writes is a promise
+    # about reproducibility, so a silent deletion of the timing is not enough
+    assert any("re-running the generator has to leave it byte-identical" in d.read_text("utf8")
+               for d in docs), "the answer key no longer states its own reproducibility rule"
 
 
 @contextlib.contextmanager

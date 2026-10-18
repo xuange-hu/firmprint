@@ -126,17 +126,40 @@ def test_memory_windows_are_not_reported_as_peripherals(by_kind):
 
 
 def test_the_map_that_matched_is_also_judged_on_what_it_misses(report, by_kind):
-    """A match is only honest next to the addresses it could not name."""
+    """A match is only honest next to the addresses it could not name.
+
+    The numbers here are the sample's, not the tool's promise, and they moved when the
+    answer key was re-pinned to OpenMV `v5.0.1`: the ELF decodes enough more code than the
+    raw dump to reach one address that `stm32h743xx` *does* name.  That is the contested
+    path finally firing on a real image instead of a fixture, and the row is required to
+    change its own confidence when it happens -- 0.6 with a rival named, 0.45 as a bare
+    database gap.
+    """
     gap, = by_kind["soc.coverage"]
     stats = report["meta"]["decode"]
     assert gap["metrics"]["addresses"] == stats["unmapped_device_constants"]
     assert gap["metrics"]["accesses"] == stats["unmapped_device_accesses"]
     assert gap["metrics"]["other_maps_compared"] == 2, "the comparison must actually be made"
-    # F427 is the right part for this image, so nothing here is contested: the gap is
-    # reported as a hole in the databases, never as evidence of a wrong SoC.
-    assert gap["confidence"] == 0.45 and gap["metrics"]["contested"] == 0
-    assert "no other installed map names them" in gap["summary"]
+    assert gap["metrics"]["contested"] == 1, "one miss is hardware another map can name"
+    assert gap["metrics"]["contested_by"] == {H7: 1}
+    assert gap["confidence"] == 0.6, "a contested gap is evidence about the part, not a footnote"
+    assert "another installed map sees hardware this one does not" in gap["summary"]
     assert all("reached 0x" in e["note"] for e in gap["evidence"])
+
+
+def test_a_gap_no_installed_map_names_stays_a_database_gap(bin_path):
+    """The other half of the rule: with no rival, the same kind of row must not threaten.
+
+    `firmware.bin` of the same board decodes 9k fewer instructions than its ELF twin and
+    never reaches the H7-named address, so its coverage row is the quiet case -- and both
+    rows come from the same engine on the same part, which is what makes the difference in
+    confidence a judgement about evidence rather than about the file format.
+    """
+    rep = analyze(str(bin_path), budget=0x8_0000)
+    gap, = [f for f in rep["findings"] if f["kind"] == "soc.coverage"]
+    assert gap["metrics"]["contested"] == 0 and gap["metrics"]["contested_by"] == {}
+    assert gap["confidence"] == 0.45 < STRICT_CONFIDENCE
+    assert "no other installed map names them" in gap["summary"]
 
 
 # -------------------------------------------------------------- the byte-level promise

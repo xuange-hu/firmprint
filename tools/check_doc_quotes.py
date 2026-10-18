@@ -6,8 +6,16 @@ rewritten to three decimals, a summary gets paraphrased, a count changes because
 heuristic was fixed.  Each of those is a documentation bug of the worst kind, because the
 whole argument of this project is that a claim comes with its evidence.
 
-So the quotes are machine-checked, in three ways:
+So the quotes are machine-checked, in five ways:
 
+  * the bytes come first: every scanned image is compared with the digest
+    `verification/<board>.md` says it was generated from, and a difference is reported as
+    *moved samples* rather than as stale prose -- because a fetcher that silently downloads
+    a different build makes every quote below fail for a reason the reader cannot fix;
+  * a digest a *sentence* names ("790,416 bytes, sha256 `7b7f…`") has to be the digest of an
+    image this checker scanned, or of a header the installed database was generated from --
+    the case studies open by inviting the reader to hash the file themselves, and that
+    invitation is the least checked claim in the repository;
   * a ```json fragment must be a *subset* of some real finding (every key it shows has to
     carry that finding's value, strings matched as substrings because the docs elide);
   * a text-shaped `kind subject conf` line, a header line (`match`, `candidates`,
@@ -18,7 +26,7 @@ So the quotes are machine-checked, in three ways:
     unused slots") must be printed by some real run.  This is the check that catches the
     worst kind of doc bug, an illustrative number that was never measured; the fix is either
     to say it without inventing a count or to make the number real, because the corpus here
-    is derived from runs and from the two documented constants it reads out of `cli` and
+    is derived from runs and from the documented constants it reads out of `cli` and
     `vectors`, never typed in.
 
 Usage:
@@ -134,8 +142,14 @@ def synthetic_image() -> Path | None:
 
 
 def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[str]],
-                                         dict[str, list[dict]]]:
-    """Return (every finding, the whole live corpus, the corpus and the findings per board).
+                                         dict[str, list[dict]], dict[str, str]]:
+    """Return (every finding, the whole live corpus, the corpus and the findings per board,
+    and the digest every image was read under).
+
+    The digest comes from the report the scanner printed, not from a second hash of the file
+    on disk: the question it answers is "what did the tool actually see", and re-reading the
+    image here would answer it with a hash nobody scanned.  It exists so that a *moved
+    sample* is reported as moved bytes rather than as stale prose -- see `described_build`.
 
     The corpus is the printed text of every scan *plus* the counts nobody prints in a
     sentence's own words: total findings per image, findings per kind, the same two for a
@@ -158,6 +172,7 @@ def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[s
     lines: list[str] = []
     by_board: dict[str, list[str]] = {}
     board_findings: dict[str, list[dict]] = {}
+    digests: dict[str, str] = {}
     for path in images:
         tag = f"{path.parent.name}/{path.name}"
         board = by_board.setdefault(path.parent.name, [])
@@ -187,6 +202,7 @@ def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[s
                 findings.extend(got)
                 seen.extend(got)
                 full = report
+                digests[tag] = report.get("meta", {}).get("file", {}).get("sha256", "")
             v = len(report.get("contract", {}).get("violations", []))
             counts = [f"counts  {tag} {sink}: {len(got)} findings, {v} violations"]
             for kind in sorted({f["kind"] for f in got}):
@@ -225,18 +241,108 @@ def run_all(images: list[Path]) -> tuple[list[dict], list[str], dict[str, list[s
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         cli.main(["socdb", "list"])
-    # `socdb list` is the installed database and the two documented limits are properties of
-    # the tool, not of one image, so both belong to every board's corpus as well as the whole
+    # `socdb list` is the installed database and the documented limits are properties of the
+    # tool, not of one image, so they belong to every board's corpus as well as the whole
     shared = buf.getvalue().splitlines() + [
-        # the row cap of the text table and the gap that ends a vector-table scan: no scan
-        # prints either unless it happens to hit it, so read them out of the source and let a
-        # doc quote them only while the code still does
+        # the row cap of the text table, the gap that ends a vector-table scan and how many
+        # ranked maps survive as candidates: no scan prints any of these unless it happens to
+        # hit the limit, so read them out of the source and let a doc quote them only while
+        # the code still does
         f"defaults  the text table caps at {cli.DEFAULT_MAX_FINDINGS} findings",
-        f"defaults  the vector scan stops after {vectors.MAX_GAP} consecutive unused slots"]
+        f"defaults  the vector scan stops after {vectors.MAX_GAP} consecutive unused slots",
+        f"defaults  only the top {vectors.CANDIDATE_RANKINGS} ranked maps become candidates"]
     lines.extend(shared)
     for board_lines in by_board.values():
         board_lines.extend(shared)
-    return findings, lines, by_board, board_findings
+    return findings, lines, by_board, board_findings, digests
+
+
+#: the line `tools/make_verification.py` writes for every image it scanned
+IMAGE_LINE = re.compile(r"^- image: `(?P<name>[^`]+)`, (?P<size>[\d,]+) bytes, "
+                        r"sha256 `(?P<sha>[0-9a-f]{64})`")
+
+
+def described_build(verification: Path) -> dict[str, str]:
+    """`board/file` -> the sha256 that board's answer key says it scanned.
+
+    The answer key is generated, so it carries the digest of the bytes it was built from,
+    and reading it back here costs nothing.
+    """
+    out: dict[str, str] = {}
+    for md in sorted(verification.glob("*.md")) if verification.is_dir() else []:
+        for line in md.read_text(encoding="utf8").splitlines():
+            if m := IMAGE_LINE.match(line.strip()):
+                out[f"{md.stem}/{m['name']}"] = m["sha"]
+    return out
+
+
+def moved_samples(digests: dict[str, str], described: dict[str, str]) -> list[str]:
+    """Every image whose scanned bytes differ from the bytes the answer key describes.
+
+    This distinction is the whole point.  On 2026-10-18 the doc gate failed on CI and said
+    the prose was stale; the prose was current and the *samples* had moved, because the
+    fetcher pulled a rolling `development` asset and printed a note when its digest did not
+    match.  A gate that reports "your documentation lies" when the real event is "the bytes
+    under analysis changed" sends the reader to fix the wrong thing -- and teaches everyone
+    to distrust the gate.
+    """
+    out = []
+    for tag, sha in sorted(digests.items()):
+        want = described.get(tag)
+        if want is not None and want != sha:
+            out.append(f"  {tag}: the scanner read sha256 {sha[:16]}..., "
+                       f"the answer key describes {want[:16]}...")
+    return out
+
+
+#: a digest asserted by a *sentence* rather than pasted from a report
+PROSE_SHA = re.compile(r"sha256[: ]+`?([0-9a-f]{12,64})")
+#: where the installed SoC database says each generated map came from
+HEADER_SHA = re.compile(rb'"header_sha256"\s*:\s*"([0-9a-f]{64})"')
+
+
+def header_digests(data_dir: Path) -> list[str]:
+    """The digests of the CMSIS headers the installed database was generated from.
+
+    A sentence can quote one of those instead of an image digest, and the samples are not
+    evidence for it -- so it has to be knowable from the same place the tool reads maps.
+    """
+    out = []
+    for p in sorted(data_dir.glob("*.json")) if data_dir.is_dir() else []:
+        out += [m.group(1).decode() for m in HEADER_SHA.finditer(p.read_bytes())]
+    return out
+
+
+def stale_digests(text: str, digests: dict[str, str], headers: list[str],
+                  board: str | None) -> list[str]:
+    """Problems for every digest a sentence names that no file this checker knows has.
+
+    The case studies open with an invitation: "scan `firmware.bin`: 790,416 bytes, sha256
+    `7b7f…` -- it is the application half of OpenMV2's flash".  That is the strongest claim in
+    this repository, a claim about exact bytes, and it was typed by hand into a paragraph while
+    the digests the *tool* prints were checked.  It is also the sentence a reader follows when
+    the download gives them something else.  A prefix counts as a claim, so a prefix is short
+    enough to fail; a doc scoped to one board may only name that board's images, because the
+    other board's digest quoted here would otherwise pass by accident.
+    """
+    out = []
+    want = (board or "").lower()
+    for m in PROSE_SHA.finditer(prose(text)):
+        sha = m.group(1)
+        if any(d.startswith(sha) for d in headers):
+            continue
+        scope = [d for tag, d in digests.items()
+                 if (board is None or tag.split("/")[0].lower() == want) and d.startswith(sha)]
+        if scope:
+            continue
+        holders = sorted({tag.split("/")[0] for tag, d in digests.items() if d.startswith(sha)})
+        hint = (f" -- that is the digest of {' and '.join(holders)}, "
+                f"not of {'the image this doc is about' if board else 'any scanned image'}"
+                if holders else "")
+        out.append(f"prose names sha256 {sha[:16]}... but no scanned image"
+                   f"{' of this board' if board else ''} (nor a database header) has "
+                   f"that digest{hint}: {flat(text[max(0, m.start() - 40):m.end() + 30])}")
+    return out
 
 
 def quoted(md: Path, want_json: bool) -> list[tuple[str, str]]:
@@ -428,7 +534,11 @@ def board_of(md: Path, names: list[str]) -> str | None:
     """
     stem = md.stem.lower()
     hits = [n for n in names if n.lower() in stem]
-    return hits[0] if len(hits) == 1 else None
+    # the answer is lower-cased because that is how a board is spelled everywhere this
+    # checker reads it -- `samples/openmv2`, `verification/openmv2.md` -- while the fetcher
+    # spells its targets `OPENMV2`.  Returning the caller's spelling is what made a
+    # correctly-pinned digest look like it belonged to the wrong board.
+    return hits[0].lower() if len(hits) == 1 else None
 
 
 def view(ls: list[str], fs: list[dict]) -> dict:
@@ -488,13 +598,30 @@ def main() -> int:
     blob = synthetic_image()
     if blob is not None:
         images = [*images, blob]
-    findings, lines, boards, board_finds = run_all(images)
+    findings, lines, boards, board_finds, digests = run_all(images)
     shutil.rmtree(SYNTH_DIR, ignore_errors=True)
+    # say it once, before the quote list, so a reader who stops at the first screen of
+    # output stops at the reason rather than at the symptom
+    moved = moved_samples(digests, described_build(ROOT / "verification"))
+    if moved:
+        print("THE SAMPLES MOVED -- these images are not the build `verification/*.md` "
+              "was generated from:")
+        for line in moved:
+            print(line)
+        print("Every quote failure below compares prose against a *different* image than "
+              "the one it was written from, so it is not evidence that the documentation "
+              "lied.  Fix the bytes first: `python tools/get_sample.py --all` to fetch the "
+              "pinned build, or `--allow-drift --show-pins` plus "
+              "`python tools/make_verification.py` to re-pin the answer key to these bytes, "
+              "then re-run this check.\n")
     # one view per board plus the whole corpus; a document picks its view by filename, so a
     # quote in the OpenMV3 study is checked against OpenMV3 runs and nothing else
     names = sorted(boards)
     views = {"*": view(lines, findings)}
     views.update({n: view(boards[n], board_finds.get(n, [])) for n in names})
+    # the database the *installed* package carries, not the checkout's: a sentence about a
+    # header digest means the header this reader's `socdb list` is built from
+    headers = header_digests(Path(cli.__file__).parent / "data")
     problems: list[str] = []
     checked = 0
 
@@ -587,7 +714,11 @@ def main() -> int:
         rel = md.relative_to(ROOT)
         name = board_of(md, names)
         live = views[name or "*"]["lines"]
-        for num, noun, where in prose_claims(md.read_text(encoding="utf8")):
+        text = md.read_text(encoding="utf8")
+        for bad in stale_digests(text, digests, headers, name):
+            checked += 1
+            problems.append(f"{rel}: {bad}")
+        for num, noun, where in prose_claims(text):
             checked += 1
             if a.list:
                 print(f"  claim  {rel}: {num} {noun}  << {where}")
@@ -610,6 +741,17 @@ def main() -> int:
     if problems:
         for p in problems:
             print("  " + p)
+    if moved:
+        # last so that it is the line a reader of a failed CI job actually sees
+        verdict = (f"FAIL: {len(moved)} image(s) scanned here are not the build "
+                   f"verification/*.md describes -- the samples moved, so this run is not "
+                   f"checking the answer key's own bytes")
+        if problems:
+            verdict += (f", and the {len(problems)} quote problem(s) above cannot be "
+                        f"judged until it is")
+        print(verdict)
+        return 1
+    if problems:
         print(f"FAIL: {len(problems)} stale quote(s) in the prose")
         return 1
     print("ok: every quoted number is what the tool prints today")

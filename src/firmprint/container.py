@@ -453,6 +453,11 @@ def load_raw(data: bytes, path: str, base: int | None = None) -> Image:
             f"no evidence. Pass --base to pin it, or treat this file as not a Cortex-M image.")
     elif base is None:
         rivals = sorted((b, n) for b, n in counts.items() if b != chosen and n)
+        # a reader who is told "17 origins tested" is entitled to know that the image
+        # offered more than that, and that the ones left out were left out for speed
+        from .vectors import proposed_bases
+        offered = proposed_bases(data, limit=None)
+        dropped = len(offered) - sum(1 for b in offered if b in counts)
         notes.append(
             f"raw dump: no container header. load base inferred as 0x{chosen:08X}: "
             f"of the {len(counts)} origins tested it is the one whose best candidate "
@@ -461,6 +466,9 @@ def load_raw(data: bytes, path: str, base: int | None = None) -> Image:
             + ("; origins that also produced tables: "
                + ", ".join(f"0x{b:08X}({n})" for b, n in rivals) if rivals
                else "; every other tested origin produced no table")
+            + (f"; {dropped} of the {len(offered)} origins its own handler words "
+               f"proposed were not shape-tested, a cap on work and not a verdict on "
+               f"them" if dropped else "")
             + ". Pass --base to pin it.")
         if score > 1:
             notes.append("more than one vector table: this is probably a merged image "

@@ -27,30 +27,60 @@ those instead of printing them.
 
 ```
 $ firmprint scan samples/openmv2/firmware.bin
-file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f…
+file        firmware.bin  783,076 B  sha256:7aa2b5364d124e3b…
 container   raw / arm  1 segment(s)  entry -
             raw dump: no container header. load base inferred as 0x08010000: of the 16 origins
             tested it is the one whose best candidate reads most like a vector table (1 table(s)
-            there, the first at file offset 0x0); origins that also produced tables: 0x08000000(1).
-            Pass --base to pin it.
+            there, the first at file offset 0x0); every other tested origin produced no table; 11 of
+            the 19 origins its own handler words proposed were not shape-tested, a cap on work and
+            not a verdict on them. Pass --base to pin it.
 match       stm32f427xx (f4, cortex-m4)  conf 0.66  best match on the RAM map, not on device constants
             db STMicroelectronics/cmsis-device-f4@eaffa1727f63…
 candidates  stm32f427xx=89 constants/81 blocks, stm32f765xx=89 constants/81 blocks, stm32h743xx=45 constants/39 blocks
 engines     container=container/1, vectors=vectors/1, carve=carve/1, decode=capstone/5.0.9
-decoded     200,010 instructions, 0 function(s), coverage 66%
+decoded     200,230 instructions, 0 function(s), coverage 67%
 contract    0 violation(s)
 
 kind                    subject              conf  summary
 ----------------------------------------------------------------------------------------------------
-cortex-m.vector_table   table@0x08010000     0.85  vector table at 0x08010000: 98 live handlers within 131 scanned slots (8 zeroed, 25 non-code), ...
-peripheral.access       RCC                  0.86  RCC: 182 decoded load/store(s) through a tracked base register; AHB1ENR/read=21, APB1ENR/read=18 ...
-memory.reference        CCMDATARAM           0.82  CCMDATARAM @0x10000000 referenced 41 times as an address constant; no CMSIS register struct ...
-soc.candidate           stm32f427xx          0.66  best match on the RAM map, not on device constants: stm32f427xx: 89 distinct device constants ...
+cortex-m.vector_table   table@0x08010000     0.85  vector table at 0x08010000: 98 live
+                                                  handlers within 131 scanned slots (8
+                                                  zeroed, 25 non-code), initial MSP
+                                                  0x1000F948, reset handler 0x080101AD; 76
+                                                  distinct targets, unused slots are
+                                                  aliased to a default handler; the scan
+                                                  stopped after 24 unused slots, so the
+                                                  live count is a lower bound
+peripheral.access       RCC                  0.86  RCC: 294 decoded load/store(s) through a
+                                                  tracked base register; APB1ENR/read=51,
+                                                  APB1ENR/write=24, CFGR/read=22,
+                                                  AHB1ENR/read=21, APB2ENR/read=21,
+                                                  CR/read=20, APB1RSTR/read=20,
+                                                  APB1RSTR/write=20; … 21 more
+                                                  register/direction pair(s) not listed, 95
+                                                  access(es) among them
+memory.reference        CCMDATARAM           0.82  CCMDATARAM @0x10000000 referenced 41
+                                                  times as an address constant; no CMSIS
+                                                  register struct: this is a memory or
+                                                  bit-band window, so it is reported as a
+                                                  memory reference; (block base)(41)
+soc.candidate           stm32f427xx          0.66  best match on the RAM map, not on device
+                                                  constants: stm32f427xx: 89 distinct
+                                                  device constants in this image land in
+                                                  its peripheral map (81 blocks), 0 of them
+                                                  in no other installed map, and 1 that
+                                                  another map explains are missing from it;
+                                                  load region inside flash base
+                                                  0x08000000; MSP inside RAM at 0x10000000;
+                                                  the stack pointer is the only thing here
+                                                  that separates it from the map it ties
+                                                  with on constants
 ```
 
-*(One row per `kind`, trimmed at the column; every line is verbatim from that run. Plain
-text caps the table at 30 findings, so `soc.candidate` only shows up with
-`--max-findings` or in `--json`.)*
+*(One row per `kind`, and the `summary` text is the tool's own, taken from `--json` and
+wrapped here at the margin rather than trimmed at the column — a quote this file cannot
+check is a quote this file should not paste.  The plain-text table caps the list at 30
+findings, so `soc.candidate` only shows up with `--max-findings` or in `--json`.)*
 
 That dump has no symbol table, no section headers and no link address in it. The tool
 inferred `0x08010000` (the true application base, sitting above a 64 KB bootloader) and
@@ -90,8 +120,9 @@ git clone https://github.com/xuange-hu/firmprint && cd firmprint
 pip install -e ".[dev]"
 python tools/make_synthetic.py blob.bin   # a shaped Cortex-M image: no download, no key
 firmprint scan blob.bin --strict          # the dependency-free path still answers
-python tools/get_sample.py --all          # 2 MIT-licensed OpenMV images, pinned by sha256
-python -m pytest -q                       # 287 tests, no network
+python tools/get_sample.py --all          # OpenMV v5.0.1 images, one 91 MB archive, every
+                                          # file pinned by sha256 and refused on mismatch
+python -m pytest -q                       # 315 tests, no network
 ```
 
 ## 30-second tour
@@ -184,7 +215,7 @@ Then it behaves differently depending on what those say:
 
 Every report line pasted in this README and in `docs/case-*.md` is compared against a live
 scan of the real images in CI — and so is every number in a *sentence*, not just in a
-transcript: that the ELF run decodes 202,041 instructions, that a table of 131 scanned slots
+transcript: that the ELF run decodes 202,077 instructions, that a table of 131 scanned slots
 had 98 of them live, that the vector scan stops after 24 consecutive unused slots (that one
 is read out of the code, so moving the constant without moving the prose fails the build).
 
@@ -206,9 +237,9 @@ Two real, MIT-licensed OpenMV boards, regenerated by `python tools/make_verifica
 
 | image | true part | firmprint said | driver oracle | contract | notes |
 |---|---|---|---|---|---|
-| OpenMV2 `firmware.elf` | STM32F427VGT6 | `stm32f427xx` | **14/14** confirmed | 0 | 202,041 instructions decoded |
+| OpenMV2 `firmware.elf` | STM32F427VGT6 | `stm32f427xx` | **14/14** confirmed | 0 | 202,077 instructions decoded |
 | OpenMV2 `firmware.bin` (metadata stripped) | STM32F427VGT6 | `stm32f427xx` | n/a (no symbols) | 0 | base inferred `0x08010000` ✓, same 81 blocks as the ELF run |
-| OpenMV3 `firmware.elf` | STM32F765VGT6 | `stm32f765xx` | **15/15** confirmed | 0 | 194,240 instructions decoded |
+| OpenMV3 `firmware.elf` | STM32F765VGT6 | `stm32f765xx` | **15/15** confirmed | 0 | 196,263 instructions decoded |
 | OpenMV3 `firmware.bin` (metadata stripped) | STM32F765VGT6 | `stm32f765xx` | n/a | 0 | base inferred `0x08020000` ✓, separated on 4 exclusive constants |
 | `openmv.bin` (merged bootloader + app) | both halves | 2 vector tables | n/a | 0 | tables at `0x08000000` **and** `0x08020000`, one file |
 
@@ -313,7 +344,8 @@ Design decisions worth stealing:
 - **Budget by default.** A 512 KB decode cap keeps a scan at ~1 s; `--full` is there when
   you want every byte and the report prints the coverage either way.
 - **A dump is not a proof.** `--base` pins what inference guessed, and the guessed note
-  lists every origin that also produced a table, so the reader sees the competition.
+  lists every origin that also produced a table *and* how many proposed origins it never
+  shape-tested, so the reader sees the competition and the budget it was priced against.
 
 ## Limitations, honestly
 
@@ -347,7 +379,7 @@ for the two worked analyses.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q          # 287 tests; the sample-dependent ones skip cleanly
+python -m pytest -q          # 315 tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
 python tools/check_doc_quotes.py   # every report line *and every number in a sentence*
@@ -363,5 +395,6 @@ absent. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT. Third-party firmware images used for verification are fetched on demand, pinned by
-sha256, and never committed to this repository.
+MIT. Third-party firmware images used for verification are fetched on demand from an
+immutable release tag, pinned file by file by sha256, refused outright when the bytes differ
+from the pin, and never committed to this repository.

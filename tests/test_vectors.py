@@ -24,6 +24,7 @@ from firmprint.vectors import (
     RAMISH,
     _in_ranges,
     infer_load_base,
+    proposed_bases,
     rank_socs,
     scan_tables,
 )
@@ -206,6 +207,59 @@ def test_proposed_bases_reads_the_origin_out_of_the_dump(omv3_bin_path):
     assert (n_tables, first_off) == (1, 0)
     elf = load(omv3_bin_path.with_name("firmware.elf"))
     assert elf.segments[0].vaddr == base, "the ELF's own program header agrees"
+
+
+def least_voted_image(base: int = 0x0804_0000, decoys: int = 6) -> bytes:
+    """A spec-shaped table whose own origin is out-voted by planted noise.
+
+    Six origins get two votes each from `(RAMISH, odd-flash)` word pairs at 128-byte
+    strides, while the real image's first word pair -- its stack pointer and reset
+    handler -- gives the truth exactly one.  That is the shape OpenMV3's `v5.0.1`
+    application dump has: the true origin is the least-voted candidate in the file.
+    """
+    head = cortex_m_image(base=base)
+    out = bytearray(head + b"\xff" * (MIN_ALIGN - len(head) % MIN_ALIGN))
+    for k in range(decoys * 2):
+        out += struct.pack("<II", 0x2000_0000 + k,
+                           (0x0810_0000 + (k // 2) * 0x1_0000) | 1)
+        out += b"\x00" * (MIN_ALIGN - 8)
+    return bytes(out)
+
+
+def test_the_vote_cap_cannot_drop_the_origin_the_first_word_pair_implies():
+    """The bug the re-pinned sample produced: a correct answer that lost a popularity vote.
+
+    `proposed_bases` caps how many origins get shape-tested, because each one costs a full
+    pass over the file and a real dump votes for dozens of one-vote accidents.  Capping by
+    vote count silently dropped OpenMV3's true `0x0802_0000` -- one vote out of 39 -- and the
+    scan then reported a confident `0x0800_0000` with a 21-handler accident as the table.  The
+    first eight bytes are the one offset a Cortex-M table is defined to occupy in a dump that
+    begins at its own flash base, so that vote is no longer dropable.
+    """
+    from firmprint.vectors import _first_word_origin
+
+    data = least_voted_image()
+    assert _first_word_origin(data) == 0x0804_0000
+    ranked = proposed_bases(data, limit=None)
+    assert ranked.index(0x0804_0000) >= 6, "the fixture must really be out-voted"
+    assert 0x0804_0000 in proposed_bases(data), "the cap lost the only evidence-grade vote"
+    assert len(proposed_bases(data)) == 6, "the cap still bounds the work"
+    base, n_tables, first_off, _ = infer_load_base(data)
+    assert (base, n_tables, first_off) == (0x0804_0000, 1, 0), \
+        f"inference chose 0x{base:08X} with {n_tables} table(s)"
+
+
+def test_the_note_says_how_many_proposed_origins_were_never_tested():
+    """"17 origins tested" is only honest if the reader learns the image offered more.
+
+    The count of rejected alternatives was already in the note; the count of origins that
+    were never *tested* was not, and that is the number which tells a reader the answer
+    could still be in the part of the list nobody looked at.
+    """
+    data = least_voted_image() + cortex_m_image(base=0x0812_0000)[:MIN_ALIGN]
+    joined = " ".join(load_raw(data, "capped.bin").notes)
+    assert "origins its own handler words proposed were not shape-tested" in joined, joined
+    assert "a cap on work and not a verdict" in joined, joined
 
 
 def test_an_itcm_stack_pointer_counts_as_ram(omv3_bin_path):

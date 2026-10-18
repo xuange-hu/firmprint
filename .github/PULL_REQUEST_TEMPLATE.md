@@ -13,9 +13,11 @@ say so out loud.
 - [ ] `python tools/get_sample.py --all && python tools/check_doc_quotes.py` ok, if any
       count, confidence or summary line changed — the README and `docs/case-*.md` quote
       real output and go stale silently
-- [ ] `python tools/make_verification.py` produces no diff (beyond the `runtimes:` line) —
-      otherwise commit the regenerated `verification/*.md` in this PR
-- [ ] `firmprint scan samples/*/firmware.bin --strict` still exits 0 on all four raw dumps
+- [ ] `python tools/make_verification.py` produces no diff — otherwise commit the
+      regenerated `verification/*.md` in this PR.  The generator writes no timings and no
+      interpreter version into those files, so "no diff" means no diff on any machine.
+- [ ] `firmprint scan … --strict` still exits 0 on all four raw dumps CI scans: the two
+      `samples/*/firmware.bin` and the two `samples/*/openmv.bin`
 
 ## If this touches a heuristic
 

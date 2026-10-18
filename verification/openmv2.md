@@ -5,7 +5,16 @@ repository ships an answer key instead of a promise.  Every number below was pro
 by `python tools/make_verification.py openmv2` against MIT-licensed OpenMV firmware —
 no figure is typed in by hand.
 
-- image: `firmware.elf`, 7,670,672 bytes, sha256 `6f14e815e2f85cc16e2a7b145d585b59e8606b25e1fc4ca07392033dfdd423ae`
+- source: OpenMV release `v5.0.1`, asset `firmware_v5.0.1.zip` (sha256 `1338b9607b57d88cf1de5aee115ea0e18cb17d06ff4d8dc55d6c022dba66dbc8`), fetched by `python tools/get_sample.py --all`
+- image: `firmware.elf`, 7,571,696 bytes, sha256 `e2f1cc135d32d733371f19a779fa0202e8a1b3d96ddc056d5e1601b24665e6f3`
+- image: `firmware.bin`, 783,076 bytes, sha256 `7aa2b5364d124e3b5ae0d6595cb41b557bf32b646ab59201165dbe6a59e20a1e`
+- image: `openmv.bin`, 848,612 bytes, sha256 `5bd1d1b26e5b0766816fd09faa914f8b63455f47b2a3517226c67ec59d12afa3`
+
+Three views of the same board: the ELF carries symbols (the oracle reads them),
+the raw flash image is what a confiscation bag actually contains, and the merged
+release image is what OpenMV ships to the device.  `tools/get_sample.py` pins all
+three by sha256, and the doc gate fails if the bytes on disk are not these.
+
 - vendor part: **STM32F427VGT6**, confirmed by the banner string the build embedded: `OPENMV2 with STM32F427`
 - firmprint answer: **stm32f427xx** (f4, cortex-m4) from `STMicroelectronics/cmsis-device-f4` header sha256 `eaffa1727f6308e9...`
 - evidence-contract violations: **0**
@@ -17,7 +26,7 @@ The oracle is the image's own symbol table: ST's Hardware Abstraction Layer link
 driver code present.  firmprint never sees that mapping as input — it reads 32-bit
 constants and Thumb-2 instructions and derives blocks from addresses.
 
-- instructions decoded: 202,041 (66% of code, 3983 functions)
+- instructions decoded: 202,077 (67% of code, 4017 functions)
 - driver-linked modules: **14**, confirmed by firmprint: **14/14** (recall 100%)
 
 | oracle module | linked symbols | firmprint block(s) | status | engine(s) |
@@ -70,13 +79,13 @@ one of them.
 
 | image | table | confidence | live handlers | slots | initial MSP | reset |
 |---|---|---|---|---|---|---|
-| firmware.elf | table@0x08010000 | 0.849 | 98 | 131 | 0x1000F958 | 0x080101AD |
-| firmware.bin | table@0x08010000 | 0.849 | 98 | 131 | 0x1000F958 | 0x080101AD |
-| openmv.bin | table@0x08010000 | 0.849 | 98 | 131 | 0x1000F958 | 0x080101AD |
+| firmware.elf | table@0x08010000 | 0.855 | 98 | 131 | 0x1000F948 | 0x080101AD |
+| firmware.bin | table@0x08010000 | 0.855 | 98 | 131 | 0x1000F948 | 0x080101AD |
+| openmv.bin | table@0x08010000 | 0.855 | 98 | 131 | 0x1000F948 | 0x080101AD |
 | openmv.bin | table@0x08000000 | 0.734 | 98 | 131 | 0x100057F0 | 0x08004215 |
 
 - merged image base inference: 0x08000000 (correct: the bootloader is at 0x08000000)
-- what the inference said out loud: raw dump: no container header. load base inferred as 0x08000000: of the 16 origins tested it is the one whose best candidate reads most like a vector table (2 table(s) there, the first at file offset 0x0); origins that also produced tables: 0x08010000(1). Pass --base to pin it.
+- what the inference said out loud: raw dump: no container header. load base inferred as 0x08000000: of the 16 origins tested it is the one whose best candidate reads most like a vector table (2 table(s) there, the first at file offset 0x0); origins that also produced tables: 0x08010000(1); 11 of the 20 origins its own handler words proposed were not shape-tested, a cap on work and not a verdict on them. Pass --base to pin it.
 
 ## 4. What it refuses to claim
 
@@ -84,14 +93,17 @@ one of them.
   map, and the map is what bytes determine.  Every candidate row keeps that in `unknowns`.
 - here no map has exclusive constants, so the report names the closest installed
   map at reduced confidence and says the databases cannot separate these parts.
-- the matched map is also judged on what it misses: 26 device address(es) reached by decoded instructions are not in stm32f427xx's map (67 accesses, e.g. 0x40012304, 0x40025FC4, 0x40025FD8, 0x42470060, 0x40005840, 0x40024600); no other installed map na…
-  (`soc.coverage`, confidence 0.45, contested addresses: 0)
+- the matched map is also judged on what it misses: 29 device address(es) reached by decoded instructions are not in stm32f427xx's map (65 accesses, e.g. 0x40012304, 0x40025FC4, 0x40025FD8, 0x42470000, 0x42470060, 0x40003840); 1 of them ARE in stm32h74…
+  (`soc.coverage`, confidence 0.6, contested addresses: 1)
 - carving proves a constant is present, not that code executed an access: those rows are
   labelled `carve/1` and never claim a direction.  `peripheral.access` rows come only
   from the capstone engine and quote instruction bytes.
 - register names resolve only where CMSIS gives the block a struct; an offset inside a
   struct hole reports as the block base rather than an invented register.
-- runtimes: ELF 1.18s, raw 0.85s, merged 1.37s (3.12.10 / windows).
+- this document is generated, and re-running the generator has to leave it byte-identical:
+  every number in it is a property of the image and of this tool.  Wall-clock timings and
+  the interpreter that produced them used to be printed here, which made "no diff" true
+  on one machine only; they are reported on stdout instead.
 
 ## Reproduce
 

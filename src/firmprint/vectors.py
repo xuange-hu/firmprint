@@ -21,6 +21,10 @@ MIN_ENTRIES = 12          # fewer than this and it is data that happens to look 
 #: (see `scan_stopped_early`), because stopping is what keeps .text words from
 #: being counted as handlers of a 131-entry table.
 MAX_GAP = 24
+#: How many ranked maps become `soc.candidate` findings.  The rest are scored but not shown,
+#: so the disclosure below has to read this number rather than repeat it: a slice edited
+#: without its sentence is a report that claims to list every alternative it never looked at.
+CANDIDATE_RANKINGS = 4
 #: Windows a Cortex-M initial stack pointer can really live in, taken per vendor RAM
 #: alias rather than as one big "looks like memory" band.  The earlier range
 #: (0x1000_0000-0x4FFF_FFFF) admitted the whole peripheral space: a .rodata word like
@@ -207,7 +211,7 @@ def _try_table(image: Image, seg: Segment, off: int, code_ranges,
     return f
 
 
-def proposed_bases(data: bytes, limit: int = 6) -> list[int]:
+def proposed_bases(data: bytes, limit: int | None = 6) -> list[int]:
     """Origins the image's own putative vector tables imply.
 
     A dump of an application linked above a bootloader (OpenMV H7 puts its app at
@@ -219,6 +223,18 @@ def proposed_bases(data: bytes, limit: int = 6) -> list[int]:
     itself.  This only *proposes*; `scan_tables` still has to accept the shape under
     that base before it can win, and the block histogram of a real dump produces a
     dozen candidates that all fail.
+
+    `limit` exists because every proposal costs a full shape test over the file, and a
+    real dump votes for dozens of one-vote origins: a constant pool of small integers
+    looks like a stack pointer followed by code almost anywhere.  `None` means no cap.
+
+    The cap is a speed choice, not a verdict -- so it is not allowed to drop the origin
+    the **first eight bytes** imply.  That word pair is the one place a Cortex-M table is
+    defined to sit when a dump begins at its own flash origin, and OpenMV3's `v5.0.1`
+    application dump is the counter-example: there the true `0x0802_0000` is the
+    least-voted of 39 proposed origins, the capped list dropped it, and the inference
+    confidently picked a 21-handler accident at `0x08174480` instead.  `tests/test_vectors.py`
+    pins both halves: the forced proposal, and the vote cap still bounding the rest.
     """
     cand: Counter = Counter()
     trim = len(data) - len(data) % 4
@@ -229,7 +245,31 @@ def proposed_bases(data: bytes, limit: int = 6) -> list[int]:
         if not _in_ranges(sp, RAMISH):
             continue
         cand[(reset & ~1) & ~(FLASH_CAND_SPAN - 1)] += 1
-    return [b for b, _n in sorted(cand.items(), key=lambda kv: (-kv[1], kv[0]))][:limit]
+    ranked = [b for b, _n in sorted(cand.items(), key=lambda kv: (-kv[1], kv[0]))]
+    if limit is None:
+        return ranked
+    first = _first_word_origin(data)
+    head = [first] if first in cand else []
+    rest = [b for b in ranked if b not in head][:max(limit - len(head), 0)]
+    return head + rest
+
+
+def _first_word_origin(data: bytes) -> int | None:
+    """The origin implied by the first two words, or None if they imply nothing.
+
+    Deliberately the same test the histogram uses -- this is not a special piece of
+    knowledge about OpenMV, it is the highest-weight instance of the evidence already in
+    use, taken from the one offset a Cortex-M vector table is specified to occupy in a
+    dump that starts at its own flash base.
+    """
+    if len(data) < 8:
+        return None
+    sp, reset = struct.unpack_from("<II", data, 0)
+    if not reset & 1 or not any(lo <= (reset & ~1) <= hi for lo, hi in FLASH_LIKE):
+        return None
+    if not _in_ranges(sp, RAMISH):
+        return None
+    return (reset & ~1) & ~(FLASH_CAND_SPAN - 1)
 
 
 def infer_load_base(data: bytes, path: str = "<raw>",
@@ -345,7 +385,7 @@ def rank_socs(image: Image, socs: dict[str, Soc], table: Finding | None,
     rows.sort(key=lambda r: (-r["score"], -r["mine"], r["name"]))
     top = rows[0]["score"] if rows else 0.0
     findings = []
-    for rank, r in enumerate(rows[:4]):
+    for rank, r in enumerate(rows[:CANDIDATE_RANKINGS]):
         soc = socs[r["name"]]
         # a candidate is only as strong as its margin: second place within a few
         # hundredths of a point means the maps are not separable by this image
@@ -401,9 +441,10 @@ def rank_socs(image: Image, socs: dict[str, Soc], table: Finding | None,
                if len(names) == 1 else [])
             + ([f"a second map scores within 0.06 of this one: the constants in this image "
                 f"do not separate {r['name']} from {rival}"] if contested else [])
-            + ([f"{len(rows) - 4} installed map(s) scored against this image but are not "
-                f"reported: only the top 4 become findings, and their numbers are in "
-                f"`socdb list`"] if rank == 0 and len(rows) > 4 else []),
+            + ([f"{len(rows) - CANDIDATE_RANKINGS} installed map(s) scored against this "
+                f"image but are not reported: only the top {CANDIDATE_RANKINGS} become "
+                f"findings, and their numbers are in `socdb list`"]
+               if rank == 0 and len(rows) > CANDIDATE_RANKINGS else []),
             metrics={"constants_explained": r["mine"], "exclusive_constants": r["lead"],
                      "blind_constants": r["blind"], "blocks_explained": r["blocks"],
                      "score": round(r["score"], 4), "contested": contested,

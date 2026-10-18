@@ -22,6 +22,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))
+
+# `get_sample` is imported, not duplicated: the document has to state the release and the
+# archive digest the fetcher *actually* pins, so a reader can re-fetch exactly these bytes.
+import get_sample as fetch  # noqa: E402
 
 from firmprint.analyze import analyze  # noqa: E402
 from firmprint.container import load  # noqa: E402
@@ -83,6 +88,39 @@ def _tables(rep: dict) -> list[dict]:
     return [f for f in rep["findings"] if f["kind"] == "cortex-m.vector_table"]
 
 
+def source_line() -> str:
+    """Where the bytes came from, named by the digest the fetcher pins for the archive.
+
+    Refuses rather than prints a blank: an answer key that does not say which build it
+    describes is a list of numbers about unnamed bytes, and `verification/*.md` exists to be
+    the file a skeptic opens first.
+    """
+    if not fetch.ASSET_SHA256:
+        raise SystemExit("tools/get_sample.py pins no archive digest, so this document "
+                         "could not say which build it describes -- pin it first")
+    unpinned = sorted(b for b, (_p, _d, pins) in fetch.BOARDS.items() if not pins)
+    if unpinned:
+        raise SystemExit(f"tools/get_sample.py pins no files for {', '.join(unpinned)}; "
+                         "refusing to write an answer key for bytes nothing can re-fetch")
+    asset = fetch.ASSET.rsplit("/", 1)[-1]
+    return (f"- source: OpenMV release `{fetch.RELEASE}`, asset `{asset}` (sha256 "
+            f"`{fetch.ASSET_SHA256}`), fetched by `python tools/get_sample.py --all`")
+
+
+def image_line(rep: dict, path: Path) -> str:
+    """One scanned build, named by the digest the scanner read.
+
+    Module level, not a closure inside `build()`, because `tools/check_doc_quotes.py` parses
+    exactly this line to learn which bytes the answer key describes, and a format contract
+    two files share has to be testable without downloading 91 MB of firmware first.
+
+    All three views of a board get a line, not just the ELF: a moved `firmware.bin` is exactly
+    as misleading as a moved `firmware.elf`, and the docs quote both.
+    """
+    m = rep["meta"]["file"]
+    return f"- image: `{path.name}`, {m['size']:,} bytes, sha256 `{m['sha256']}`"
+
+
 def build(board: str, other_board: str) -> tuple[str, dict]:
     samples, part, true_base, _doc = BOARDS[board]
     elf, binf, merged = (samples / n for n in ("firmware.elf", "firmware.bin", "openmv.bin"))
@@ -116,8 +154,14 @@ def build(board: str, other_board: str) -> tuple[str, dict]:
         f"by `python tools/make_verification.py {board}` against MIT-licensed OpenMV firmware —",
         "no figure is typed in by hand.",
         "",
-        f"- image: `{elf.name}`, {rep_elf['meta']['file']['size']:,} bytes, "
-        f"sha256 `{rep_elf['meta']['file']['sha256']}`",
+        source_line(),
+        *([image_line(rep_elf, elf), image_line(rep_bin, binf), image_line(rep_merge, merged)]
+          + ["",
+             "Three views of the same board: the ELF carries symbols (the oracle reads them),",
+             "the raw flash image is what a confiscation bag actually contains, and the merged",
+             "release image is what OpenMV ships to the device.  `tools/get_sample.py` pins all",
+             "three by sha256, and the doc gate fails if the bytes on disk are not these.",
+             ""]),
         f"- vendor part: **{part}**"
         + (f", confirmed by the banner string the build embedded: `{banner}`" if banner else ""),
         f"- firmprint answer: **{soc['device']}** ({soc['family']}, {soc['core']}) from "
@@ -216,8 +260,10 @@ def build(board: str, other_board: str) -> tuple[str, dict]:
         "  from the capstone engine and quote instruction bytes.",
         "- register names resolve only where CMSIS gives the block a struct; an offset inside a",
         "  struct hole reports as the block base rather than an invented register.",
-        f"- runtimes: ELF {t_elf}s, raw {t_bin}s, merged {t_merge}s "
-        f"({rep_elf['meta']['python']}).",
+        "- this document is generated, and re-running the generator has to leave it byte-identical:",
+        "  every number in it is a property of the image and of this tool.  Wall-clock timings and",
+        "  the interpreter that produced them used to be printed here, which made \"no diff\" true",
+        "  on one machine only; they are reported on stdout instead.",
         "",
         "## Reproduce",
         "",
@@ -232,7 +278,11 @@ def build(board: str, other_board: str) -> tuple[str, dict]:
              "recall": f"{res['confirmed']}/{res['oracle_modules']}",
              "violations": len(rep_elf["contract"]["violations"]),
              "exclusive": lead, "banner": banner,
-             "instructions": rep_elf["meta"]["decode"]["instructions"]}
+             "instructions": rep_elf["meta"]["decode"]["instructions"],
+             # for the operator's terminal, never for the document: a timing says more about
+             # the machine that ran the scan than about the firmware it read
+             "runtimes": f"ELF {t_elf}s, raw {t_bin}s, merged {t_merge}s "
+                         f"({rep_elf['meta']['python']})"}
     return "\n".join(L) + "\n", facts
 
 
@@ -249,6 +299,7 @@ def main() -> int:
         print(f"wrote verification/{BOARDS[b][3]}: {facts['device']} vs {facts['vendor_part']}, "
               f"oracle {facts['recall']}, {facts['violations']} violations, "
               f"{facts['exclusive']} exclusive constants")
+        print(f"  scanned in {facts['runtimes']}")
     return 0
 
 

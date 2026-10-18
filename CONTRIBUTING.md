@@ -13,17 +13,27 @@ python -m pytest -q                                  # sample-dependent tests sk
 python -m ruff check src tools tests
 ```
 
-Tests run without the firmware samples.  To get them (MIT-licensed OpenMV builds,
-pinned by sha256, ~10 MB):
+Tests run without the firmware samples.  To get them (MIT-licensed OpenMV builds, from an
+immutable release tag, every file pinned by sha256 — one ~91 MB archive covering both
+boards):
 
 ```bash
 python tools/get_sample.py --all
+python tools/get_sample.py --all --check   # are the files on disk the pinned build?
 ```
 
 `samples/` is gitignored.  **Never commit a firmware image** — not even a stripped one.
 Binary blobs in this repository would also make the verification claims unverifiable,
 because a reader cannot tell whether the file they checked against is the file the numbers
 came from.
+
+That last sentence is why the fetcher pins digests instead of printing a note.  It used to
+download OpenMV's rolling `development` asset and compare one archive digest; when a digest
+did not match, it said so and carried on.  On 2026-10-18 that asset was rebuilt under us, CI
+scanned a different firmware image than the answer key describes, and `check_doc_quotes.py`
+reported *the prose* as stale.  Both statements were true; only one was fixable by the person
+reading it.  So the URL now names a tag, the archive and each of its six files are checked
+against a pinned sha256, and a mismatch exits non-zero before anything is written.
 
 ## The three rules that gate most changes
 
@@ -48,11 +58,14 @@ package manager recognises.  Pin the *shape* of an engine label in tests, never 
 
 **3. A number quoted in prose must be a number the tool prints today.**  `README.md` and
 `docs/case-*.md` paste real report rows, and a heuristic fix silently makes one of them
-stale.  `python tools/check_doc_quotes.py` re-scans every fetched sample and checks three
-things: each quoted row, each wrapped summary tail and each `` ```json `` fragment against
-live output (JSON fragments must be a *subset* of a real finding, so the docs may elide but
-not invent); each multi-line header quote as a contiguous transcript; and every number in a
-*sentence* — outside the fenced blocks — that names a report quantity.  It runs in CI in the
+stale.  `python tools/check_doc_quotes.py` re-scans every fetched sample and checks five
+things, in this order: that the bytes on disk are the build the answer key describes; then
+each quoted row, each wrapped summary tail and each `` ```json `` fragment against live
+output (JSON fragments must be a *subset* of a real finding, so the docs may elide but
+not invent); each multi-line header quote as a contiguous transcript; every digest a
+*sentence* names — it has to be the digest of an image the checker scanned, or of a header
+the installed database was generated from; and every number in a *sentence* — outside the
+fenced blocks — that names a report quantity.  It runs in CI in the
 `verification` job, and it is the gate to run after any change that moves a count or a
 confidence:
 
@@ -67,9 +80,10 @@ compare against, and the check is deliberately not a test of prose style.
 The corpus a sentence is checked against is **built from runs, never typed in**: the printed
 text of every scan, plus counts derived from the same report objects (findings per image,
 rows per kind, the `--no-code` pass, each map's exclusive/blind constants, the `verify`
-oracle score for an ELF), plus `socdb list`, plus the two documented limits the code owns —
-`cli.DEFAULT_MAX_FINDINGS` and `vectors.MAX_GAP`.  So "the scan stops after 24 consecutive
-unused slots" is a checked claim, and changing `MAX_GAP` without changing the prose fails.
+oracle score for an ELF), plus `socdb list`, plus the three documented limits the code owns —
+`cli.DEFAULT_MAX_FINDINGS`, `vectors.MAX_GAP` and `vectors.CANDIDATE_RANKINGS`.  So "the scan
+stops after 24 consecutive unused slots" is a checked claim, and changing `MAX_GAP` without
+changing the prose fails.
 
 Two consequences for anyone writing docs here.  A number you invented for a rhetorical effect
 ("it turns 40 unsupported references into 40 accesses") will fail, and the fix is to write the
@@ -140,6 +154,29 @@ Every figure in those files is machine-produced, and each document opens with th
 evidence-contract violation count for the run it came from — currently **0** for both
 boards.  A PR that changes behaviour on a sample should land with the regenerated document
 in it, so a reviewer can see the movement instead of taking it on faith.
+
+Those documents also open with three `- image:` lines, one per scanned view, each carrying
+the sha256 the scanner read.  They are not decoration: `tools/check_doc_quotes.py` compares
+the digests of the images it is about to scan against them and fails with *the samples
+moved* when they differ.  Regenerating the document is what updates the promise, so a
+document whose digests no longer match the tree is a document that describes firmware nobody
+scanned.
+
+### When the samples legitimately move
+
+Changing the pinned release is the one contribution that rewrites what every number in the
+repository means, so it is a deliberate sequence and the tools print it:
+
+```bash
+python tools/get_sample.py --all --force --allow-drift --show-pins  # digests, paste-ready
+# paste the printed BOARDS entries into tools/get_sample.py, and ASSET_SHA256 with it
+python tools/make_verification.py                                   # rebuild the answer key
+python tools/check_doc_quotes.py                                    # find the prose it broke
+```
+
+Then fix `README.md` and `docs/case-*.md` until that last command prints `ok`, and land the
+pin change, the regenerated documents and the re-pasted quotes in one commit — a half-done
+re-pin is exactly the state the gate was written to detect.
 
 ## Style
 
