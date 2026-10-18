@@ -389,7 +389,7 @@ def rank_socs(image: Image, socs: dict[str, Soc], table: Finding | None,
                 "several STM32 variants share a peripheral map; confirm with DBGMCU/IDCODE, "
                 "option bytes or the vector-table entry count",
                 f"database provenance: {soc.provenance.get('source_repo')}@"
-                f"{str(soc.provenance.get('header_sha256'))[:12]}",
+                f"{str(soc.provenance.get('header_sha256'))[:12]}…",
             ] + (["no candidate has exclusive constants: the image cannot be pinned to one "
                   "part with the installed databases"] if r["ambiguous"] else [])
             + (["the peripheral constants in this image are identical under another "

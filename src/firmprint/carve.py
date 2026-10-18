@@ -256,7 +256,7 @@ def strings_finding(image: Image, minlen: int = 8, limit: int = 400) -> Finding 
         hints.sort(key=lambda a_s: (-_hint_rank(a_s[1]), a_s[0]))
         more = "at least " if len(hints) >= _HINT_CAP else ""
         tail = (f"; {more}{len(hints)} read as identity hints, strongest: "
-                + "; ".join(f"'{h[:60]}'" for _a, h in hints[:5]))
+                + "; ".join(f"'{_cut(h, 60)}'" for _a, h in hints[:5]))
     else:
         tail = ("; none of them reads like a build string, so there is no textual "
                 "identity evidence in this image")
@@ -267,7 +267,12 @@ def strings_finding(image: Image, minlen: int = 8, limit: int = 400) -> Finding 
         summary=head + tail,
         engine="carve/1",
         rule="region.strings.informative",
-        evidence=[Evidence(kind="string", note="ASCII run", vaddr=a, text=s[:120])
+        # `text` stays byte-exact -- it is the thing a reader greps the image for -- so the
+        # cut is disclosed in the note instead of being drawn into the quote with an ellipsis
+        evidence=[Evidence(kind="string",
+                           note="ASCII run" if len(s) <= 120 else
+                           f"ASCII run of {len(s)} characters, first 120 shown",
+                           vaddr=a, text=s[:120])
                   for a, s in (hints[:6] or found[:6])],
         unknowns=[
             "strings surviving in a blob does not prove the corresponding code path runs",
@@ -295,6 +300,16 @@ _PART_RE = re.compile(r"(?:\bstm\d{2}[tfh]\d{3,4}(?:[a-z]\d?)?\b)"   # STM32F427
                       r"|(?:\bat9[16]\w*\d+\b|\bsam\d+\b)"
                       r"|(?:cortex[ -_]?m\d)", re.I)
 _BRAND_RE = re.compile(r"(openmv|micropython|stm32|st\s*micro)", re.I)
+
+
+def _cut(s: str, width: int) -> str:
+    """Fit a string into `width` characters and mark the cut.
+
+    A quoted run that stops mid-word is indistinguishable from a shorter run, and these
+    quotes are what a reader greps the image for: `'OPENMV2 with STM32F4'` sends them
+    looking for something that does not exist. The ellipsis costs one character.
+    """
+    return s if len(s) <= width else s[:width - 1] + "…"
 
 
 def _hint_rank(s: str) -> int:

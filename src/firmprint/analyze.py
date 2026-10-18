@@ -142,7 +142,7 @@ def to_markdown(report: dict) -> str:
     if soc:
         lines.append(f"- matched SoC: **{soc['device']}** ({soc['family']}, {soc['core']}), "
                      f"{soc['peripherals']} mapped peripherals, db from "
-                     f"{soc['provenance']['source_repo']}@`{str(soc['provenance']['header_sha256'])[:12]}`")
+                     f"{soc['provenance']['source_repo']}@`{str(soc['provenance']['header_sha256'])[:12]}…`")
     else:
         # `chosen` still named the peripherals below -- that is a naming convention
         # borrowed from whichever database the engine had to pick, not a claim about this

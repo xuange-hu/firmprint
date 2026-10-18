@@ -132,6 +132,42 @@ def test_a_dump_of_erasable_size_still_produces_a_report(tmp_path, capsys):
     assert "contract    0 violation(s)" in capsys.readouterr().out
 
 
+def _report_with(**over) -> dict:
+    meta = _stub_meta()
+    meta.update(over.pop("meta", {}))
+    return {"schema": cli.SCHEMA, "meta": meta, "findings": [],
+            "contract": {"strict": True, "violations": []}, **over}
+
+
+def test_a_header_that_shows_three_notes_says_how_many_it_held_back():
+    """The notes are the load-base reasoning, and the reasoning is the whole point."""
+    report = _report_with(meta={"container": {"format": "raw", "arch": "arm", "segments": [],
+                                              "entry": None,
+                                              "notes": [f"note {i}" for i in range(6)]}})
+    out = cli._short(report, 50)
+    assert "note 2" in out and "note 3" not in out
+    assert "... 3 more note(s); --json carries all 6" in out
+
+
+def test_a_violation_list_that_stops_at_eight_counts_the_rest_out_loud():
+    """`grep -c VIOLATION` must keep counting violations, not notes about the list."""
+    report = _report_with(contract={"strict": True, "violations": [f"v{i}: bad" for i in
+                                                                    range(20)]})
+    out = cli._short(report, 50)
+    assert out.count("VIOLATION   v") == 8
+    assert "... 12 more violation(s); --json lists all 20" in out
+    assert "VIOLATION   ..." not in out
+
+
+def test_a_shortened_hash_is_marked_as_shortened():
+    """`sha256:0000…` and a full hash must not be the same string in a report."""
+    candidate = {"kind": "soc.candidate", "subject": "stm32f427xx", "confidence": 0.81,
+                 "summary": "best match: stm32f427xx: 1 distinct device constant"}
+    out = cli._short(_report_with(findings=[candidate]), 50)
+    assert "sha256:" + "0" * 16 + "…" in out
+    assert "@y…\n" in out, "the header-hash provenance column is a prefix too"
+
+
 # ---------------------------------------------------------------------------- socdb
 
 def test_socdb_list_names_every_installed_database(capsys):

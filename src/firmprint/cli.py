@@ -62,7 +62,7 @@ def _short(report: dict, max_findings: int) -> str:
     soc = meta["soc"]
     dec = meta.get("decode") or {}
     out.append(f"file        {Path(meta['file']['path']).name}  "
-               f"{meta['file']['size']:,} B  sha256:{meta['file']['sha256'][:16]}")
+               f"{meta['file']['size']:,} B  sha256:{meta['file']['sha256'][:16]}…")
     out.append(f"container   {meta['container']['format']}"
                f"{' / ' + str(meta['container'].get('arch')) if meta['container'].get('arch') else ''}"
                f"  {len(meta['container']['segments'])} segment(s)"
@@ -71,9 +71,15 @@ def _short(report: dict, max_findings: int) -> str:
     # thing a reviewer needs: which origins were tried, which also produced a table.  It
     # lived only in the JSON, which meant `scan dump.bin` printed an inferred address
     # with the reasoning hidden -- the opposite of the promise in the README.
-    for note in (meta["container"].get("notes") or [])[:3]:
+    notes = meta["container"].get("notes") or []
+    for note in notes[:3]:
         out.append(textwrap.fill(note, width=100, initial_indent=" " * 12,
                                  subsequent_indent=" " * 12))
+    if len(notes) > 3:
+        # the reasoning is the point of these lines, so a header that shows three of six
+        # has to say that three more exist and where they are
+        out.append(f"             ... {len(notes) - 3} more note(s); --json carries "
+                   f"all {len(notes)}")
     cands = [f for f in report["findings"] if f["kind"] == "soc.candidate"]
     top = cands[0] if cands else None
     if soc and top:
@@ -85,7 +91,7 @@ def _short(report: dict, max_findings: int) -> str:
         out.append(f"match       {flag}{soc['device']} ({soc['family']}, {soc['core']})"
                    f"  conf {top['confidence']:.2f}  {head}")
         out.append(f"            db {soc['provenance']['source_repo']}"
-                   f"@{str(soc['provenance']['header_sha256'])[:12]}")
+                   f"@{str(soc['provenance']['header_sha256'])[:12]}…")
     else:
         out.append("match       none")
     per = meta["soc_scan"].get("per_database") or {}
@@ -113,8 +119,14 @@ def _short(report: dict, max_findings: int) -> str:
     left = len(report["findings"]) - max_findings
     if left > 0:
         out.append(f"... {left} more finding(s): use --max-findings or --json")
-    for v in report["contract"]["violations"][:8]:
+    viols = report["contract"]["violations"]
+    for v in viols[:8]:
         out.append(f"VIOLATION   {v}")
+    if len(viols) > 8:
+        # the count line above already gives the total.  Deliberately not prefixed with
+        # `VIOLATION`: a note that a list was cut is not itself a violation, and
+        # `grep -c VIOLATION` has to keep counting only violations.
+        out.append(f"... {len(viols) - 8} more violation(s); --json lists all {len(viols)}")
     out.append("")
     return "\n".join(out) + "\n"
 
@@ -144,7 +156,7 @@ def cmd_socdb(a: argparse.Namespace) -> int:
             s = soc.summary()
             print(f"{n:<22} {s['family']:<4} {s['core']:<11} "
                   f"{s['peripherals']:>4} blocks  {s['struct_types']:>3} structs  "
-                  f"{str(s['provenance'].get('header_sha256'))[:12]}")
+                  f"{str(s['provenance'].get('header_sha256'))[:12]}…")
         return 0
     if a.socdb == "show":
         if not a.name:
@@ -153,9 +165,13 @@ def cmd_socdb(a: argparse.Namespace) -> int:
             return 2
         soc = load_soc(a.name, data_dir=d)
         print(dumps(soc.summary()))
-        for name in sorted(soc.peripherals)[:a.limit]:
+        blocks = sorted(soc.peripherals)
+        for name in blocks[:a.limit]:
             e = soc.peripherals[name]
             print(f"  {name:<22} 0x{e['base']:08X}  {e.get('type') or '-'}")
+        if len(blocks) > a.limit:
+            print(f"  ... {len(blocks) - a.limit} more block(s) of {len(blocks)}; "
+                  f"--limit raises the cap")
         return 0
     return 2
 
@@ -209,7 +225,7 @@ def cmd_build(a: argparse.Namespace) -> int:
     print(f"{dest}: {len(db['peripherals'])} peripheral blocks, "
           f"{len(db['types'])} register structs, "
           f"{sum(len(v) for v in db['types'].values())} register offsets, "
-          f"header sha256 {db['provenance']['header_sha256'][:16]}")
+          f"header sha256 {db['provenance']['header_sha256'][:16]}…")
     return 0
 
 

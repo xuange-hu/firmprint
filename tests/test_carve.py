@@ -216,6 +216,20 @@ def test_a_build_string_past_the_sample_limit_is_still_found():
     assert f.evidence[0].vaddr is not None, "a hint the reader cannot locate is decoration"
 
 
+def test_a_long_hint_is_cut_visibly_in_summary_and_exactly_in_evidence():
+    """The summary quote is for reading; the evidence text is what a reader greps for.
+
+    So the two get different treatment on purpose: an ellipsis in the summary, a byte-exact
+    `text` plus a note that says the run is longer than what is shown.
+    """
+    text = "OPENMV2 firmware build banner for STM32F427 " * 4
+    f = carve.strings_finding(image_of(text.encode() + b"\x00"))
+    assert len(text) > 120
+    assert f.evidence[0].text == text[:120], "evidence text must stay byte-exact"
+    assert "ASCII run of 176 characters, first 120 shown" in f.evidence[0].note
+    assert f"'{text[:59]}…'" in f.summary, f.summary
+
+
 # ------------------------------------------------------- evidence anchors in text files
 
 def test_a_word_found_in_intel_hex_anchors_to_the_record_not_a_linear_offset(tmp_path, soc):

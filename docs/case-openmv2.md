@@ -20,7 +20,7 @@ pass on it finds nothing that says "STM32".
 
 ```
 $ firmprint scan samples/openmv2/firmware.bin
-file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f
+file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f…
 container   raw / arm  1 segment(s)  entry -
             raw dump: no container header. load base inferred as 0x08010000: of the 16
             origins tested it is the one whose best candidate reads most like a vector
@@ -79,7 +79,7 @@ Three things in that summary are load-bearing:
 
 ```
 match       stm32f427xx (f4, cortex-m4)  conf 0.66  best match on the RAM map, not on device constants
-            db STMicroelectronics/cmsis-device-f4@eaffa1727f63
+            db STMicroelectronics/cmsis-device-f4@eaffa1727f63…
 candidates  stm32f427xx=89 constants/81 blocks, stm32f765xx=89 constants/81 blocks,
             stm32h743xx=45 constants/39 blocks
 ```
@@ -128,7 +128,8 @@ the strong ones, because each quotes a decoded instruction:
 peripheral.access  RCC   0.86  RCC: 182 decoded load/store(s) through a tracked base
                                register; AHB1ENR/read=21, APB1ENR/read=18, CFGR/read=18,
                                CR/read=16, AHB1ENR/write=11, CR/write=10, CFGR/write=10,
-                               APB1ENR/write=10
+                               APB1ENR/write=10; … 19 more register/direction pair(s) not
+                               listed, 68 access(es) among them
 
   evidence  0x080101AE  ldr r3, [r0]  [read]  reached 0x40023830 -> RCC+0x030 (AHB1ENR)
             file offset 430, bytes 0368

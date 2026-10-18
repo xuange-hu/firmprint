@@ -27,14 +27,14 @@ those instead of printing them.
 
 ```
 $ firmprint scan samples/openmv2/firmware.bin
-file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f
+file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f…
 container   raw / arm  1 segment(s)  entry -
             raw dump: no container header. load base inferred as 0x08010000: of the 16 origins
             tested it is the one whose best candidate reads most like a vector table (1 table(s)
             there, the first at file offset 0x0); origins that also produced tables: 0x08000000(1).
             Pass --base to pin it.
 match       stm32f427xx (f4, cortex-m4)  conf 0.66  best match on the RAM map, not on device constants
-            db STMicroelectronics/cmsis-device-f4@eaffa1727f63
+            db STMicroelectronics/cmsis-device-f4@eaffa1727f63…
 candidates  stm32f427xx=89 constants/81 blocks, stm32f765xx=89 constants/81 blocks, stm32h743xx=45 constants/39 blocks
 engines     container=container/1, vectors=vectors/1, carve=carve/1, decode=capstone/5.0.9
 decoded     200,010 instructions, 0 function(s), coverage 66%
@@ -91,7 +91,7 @@ pip install -e ".[dev]"
 python tools/make_synthetic.py blob.bin   # a shaped Cortex-M image: no download, no key
 firmprint scan blob.bin --strict          # the dependency-free path still answers
 python tools/get_sample.py --all          # 2 MIT-licensed OpenMV images, pinned by sha256
-python -m pytest -q                       # 281 tests, no network
+python -m pytest -q                       # 287 tests, no network
 ```
 
 ## 30-second tour
@@ -347,7 +347,7 @@ for the two worked analyses.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q          # 281 tests; the sample-dependent ones skip cleanly
+python -m pytest -q          # 287 tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
 python tools/check_doc_quotes.py   # every report line *and every number in a sentence*

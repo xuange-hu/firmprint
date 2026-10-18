@@ -489,13 +489,21 @@ def _fold(accesses: dict, immediates: dict, soc: Soc, image: Image, stats: dict)
         if n > len(evs):
             entry["capped"] = True
     for pname, entry in sorted(per.items(), key=lambda kv: -kv[1]["accesses"]):
-        top = sorted(entry["regs"].items(), key=lambda kv: -kv[1])[:8]
+        regs = sorted(entry["regs"].items(), key=lambda kv: -kv[1])
+        top = regs[:8]
+        more = len(regs) - len(top)
         f = Finding(
             kind="peripheral.access",
             subject=pname,
             confidence=0.86 if entry["accesses"] >= 5 else 0.74,
             summary=(f"{pname}: {entry['accesses']} decoded load/store(s) through a tracked base "
-                     f"register; " + ", ".join(f"{r}/{d}={n}" for (r, d), n in top)),
+                     f"register; " + ", ".join(f"{r}/{d}={n}" for (r, d), n in top)
+                     # the eight pairs listed do not add up to `accesses`, and a reader who
+                     # checks that arithmetic needs to be told the list was cut, not that the
+                     # rest of the traffic vanished
+                     + (f"; … {more} more register/direction pair(s) not listed, "
+                        f"{sum(n for _k, n in regs[len(top):])} access(es) among them"
+                        if more else "")),
             engine=stats["engine"],
             rule="peripheral.access.tracked-base-register",
             evidence=list(entry["ev"]),
@@ -506,7 +514,8 @@ def _fold(accesses: dict, immediates: dict, soc: Soc, image: Image, stats: dict)
             ] + ([f"the count is the full total; evidence records for one register and "
                   f"direction stop after {_EVIDENCE_CAP} sites"] if entry["capped"] else []),
             metrics={"accesses": entry["accesses"],
-                     "registers": {f"{r}/{d}": n for (r, d), n in top}},
+                     "registers": {f"{r}/{d}": n for (r, d), n in top},
+                     "register_pairs_total": len(regs)},
         )
         out.append(f)
 

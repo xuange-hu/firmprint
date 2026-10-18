@@ -195,9 +195,32 @@ def test_fold_reports_direction_counts_and_escalates_confidence_with_volume(soc,
     f, = findings
     assert f.kind == "peripheral.access" and f.subject == "USART1"
     assert f.confidence == 0.86 and f.rule == "peripheral.access.tracked-base-register"
-    assert f.metrics == {"accesses": 6, "registers": {"CR1/write": 5, "SR/read": 1}}
+    assert f.metrics == {"accesses": 6, "registers": {"CR1/write": 5, "SR/read": 1},
+                         "register_pairs_total": 2}
+    assert "not listed" not in f.summary, "two pairs fit; the cut sentence is a lie here"
     assert f.evidence[0].hex and not validate([f])
     assert any("function boundaries" in u for u in f.unknowns)
+
+
+def test_a_fold_that_lists_eight_pairs_accounted_for_the_other_four(soc, image):
+    """`accesses` is a total; the register list is a top-8 sample, and the two do not add up.
+
+    A reader who sums the listed pairs against the headline number is doing exactly the
+    arithmetic this tool invites, so the summary has to close the gap out loud.
+    """
+    accesses = {}
+    for i in range(12):
+        accesses[("RCC", f"REG{i}", "write")] = [
+            Evidence(kind="instruction", note="x", file_offset=0, vaddr=TEXT_BASE, hex="0068")
+        ] * (i + 1)
+    f, = decode._fold(accesses, {}, soc, image,
+                      {"engine": "capstone/test", "instructions": 400, "coverage": 0.5})
+    listed = sum(int(v) for v in f.metrics["registers"].values())
+    assert f.metrics["accesses"] == 78 and f.metrics["register_pairs_total"] == 12
+    assert listed == 68, f.metrics["registers"]
+    assert "… 4 more register/direction pair(s) not listed, 10 access(es) among them" \
+        in f.summary
+    assert listed + 10 == f.metrics["accesses"]
 
 
 def test_a_single_quiet_access_stays_below_the_confident_bar(soc, image):
