@@ -173,6 +173,31 @@ def test_a_dropped_note_line_breaks_the_run():
     assert chk.norm(" ".join(runs[0])) not in live
 
 
+def test_a_transcript_with_the_tools_own_ellipsis_is_still_checked():
+    """A marker used to mean "skip this block"; the CLI started printing one, so coverage fell.
+
+    Shortening a hash in the header row puts `…` inside a *faithful* paste, and the run check
+    treated any marker as a hand trim: the transcript stopped being compared and the checker
+    still said ok, four quotes lighter.  Now an exact match is tried first and a marked paste
+    falls back to ordered pieces, so lines assembled out of order still fail.
+    """
+    printed = ["file        firmware.bin  790,416 B  sha256:7b7fca163c0a266f…",
+               "container   raw / arm  1 segment(s)  entry -",
+               "match       stm32f427xx (f4, cortex-m4)  conf 0.66  best match"]
+    corpus = chk.norm("\n".join(printed))
+    text = chk.norm(" ".join(printed))
+    assert "…" in text, "the marker has to be inside the run for this test to mean anything"
+    assert chk.header_runs(printed) == [printed]
+    assert text in corpus, "a faithful paste must still match exactly"
+    assert chk.in_order(corpus, chk.elided_pieces(text))
+
+    assembled = chk.norm(" ".join([printed[0], printed[2], printed[1]]))
+    assert assembled not in corpus
+    pieces = chk.elided_pieces(assembled)
+    assert len(pieces) == 2, pieces
+    assert not chk.in_order(corpus, pieces), "real lines in the wrong order is a fake run"
+
+
 def test_a_json_fence_that_does_not_parse_is_still_classified_as_json(tmp_path):
     """The bug worth catching is a ```json block that is not valid JSON.
 
@@ -346,4 +371,8 @@ def test_the_repo_prose_passes_and_is_actually_checked(capsys):
     report = capsys.readouterr().out
     assert rc == 0, report
     n = int(re.search(r"(\d+) quoted fragments/lines checked", report).group(1))
-    assert n >= 40, f"the checker found only {n} quotes; its patterns are stale:\n{report}"
+    # 54 is what the prose carries today.  The floor exists because the count, not the exit
+    # code, is the only signal that a check stopped running at all: the day the CLI began
+    # printing its own `…` under a shortened hash, four transcripts fell out of the run check
+    # and the gate said "ok" while covering less than it had the run before.
+    assert n >= 50, f"the checker found only {n} quotes; its patterns are stale:\n{report}"

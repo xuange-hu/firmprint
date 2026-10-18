@@ -282,6 +282,32 @@ def header_runs(lines: list[str]) -> list[list[str]]:
     return runs
 
 
+def in_order(corpus: str, frags: list[str]) -> bool:
+    """Every fragment appears in the corpus, and each one after the previous.
+
+    Order is the part that catches an assembled transcript: two real lines from two
+    different runs both exist in the corpus, and only the sequence says they were never
+    printed next to each other.
+    """
+    at = 0
+    for f in frags:
+        i = corpus.find(f, at)
+        if i < 0:
+            return False
+        at = i + len(f)
+    return True
+
+
+def elided_pieces(text: str) -> list[str]:
+    """Split a transcript at elision markers, dropping the markers themselves.
+
+    Both the tool's own `…` (a hash shortened for the column) and a hand-written ` ... `
+    land here; what a caller loses is the adjacency *across* the marker, which is exactly
+    the thing that was being thrown away when a marked transcript skipped its run check.
+    """
+    return [p for p in (norm(x) for x in re.split(r"…| ?\.\.\. ?", text)) if p]
+
+
 # The nouns a number in prose is claiming about this tool's own output.  Deliberately
 # narrow: `128 KB bootloader` and `Python 3.10` are facts about the firmware and the
 # interpreter, and what makes a claim checkable is that it names a report quantity.
@@ -538,16 +564,24 @@ def main() -> int:
                                         f"{board or 'the documented images'}: {head[:70]}")
             for run in header_runs(block_lines):
                 text = norm(" ".join(run))
-                if "…" in text or " ..." in text:
-                    continue                      # an elided transcript is a deliberate trim
+                # A transcript carrying an elision marker used to be skipped whole -- which is
+                # how a checker quietly loses coverage: the CLI now prints its own `…` at the
+                # end of a shortened hash, so a faithful paste became "deliberately trimmed"
+                # and stopped being compared at all.  Exact match is still the first try; when
+                # it fails, every piece between markers has to be real and appear in the order
+                # the CLI prints them, so a line lifted from another run is still caught.
                 checked += 1
                 if a.list:
                     print(f"  run    {rel}: {text[:70]}")
-                if text not in v["text"]:
-                    problems.append(
-                        f"{rel}: {len(run)} header lines quoted as one transcript, but no run "
-                        f"prints them consecutively -- a line was dropped or taken from "
-                        f"another image: {text[:80]}")
+                if text in v["text"]:
+                    continue
+                frags = elided_pieces(text)
+                if frags and in_order(v["text"], frags):
+                    continue
+                problems.append(
+                    f"{rel}: {len(run)} header lines quoted as one transcript, but no run "
+                    f"prints them consecutively -- a line was dropped or taken from "
+                    f"another image: {text[:80]}")
 
     for md in DOCS:
         rel = md.relative_to(ROOT)
