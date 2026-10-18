@@ -251,6 +251,50 @@ def test_no_immediates_means_no_materialised_finding(soc, image):
                         {"engine": "capstone/test", "instructions": 0, "coverage": 0.0}) == []
 
 
+def test_a_materialised_row_that_stops_naming_blocks_says_who_is_missing(soc, image):
+    """A subject that counts ten blocks may not be followed by eight names and silence.
+
+    The row used to list `names[:8]` in brackets and nothing else, so on an image where
+    immediate pairs reach more than eight peripherals the report claimed ten and showed eight
+    -- the same undeclared subset the peripheral rows were fixed for, one column to the left.
+    """
+    blocks = sorted(n for n, d in soc.peripherals.items() if soc.is_peripheral(n))
+    assert len(blocks) > decode._IMMEDIATE_NAME_CAP, "the map is too small to exercise the cap"
+    pick = blocks[:decode._IMMEDIATE_NAME_CAP + 2]
+    imm = {(name, None, None): [Evidence(kind="instruction", note=name, file_offset=i * 4,
+                                         vaddr=TEXT_BASE + i * 4, hex="0068")] * 3
+           for i, name in enumerate(pick)}
+    findings = decode._fold({}, imm, soc, image,
+                            {"engine": "capstone/test", "instructions": 4000, "coverage": 0.8})
+    f, = findings
+    assert f.metrics["peripherals"] == pick
+    named, missing = pick[:decode._IMMEDIATE_NAME_CAP], pick[decode._IMMEDIATE_NAME_CAP:]
+    for name in named:
+        assert name in f.summary
+    for name in missing:
+        assert name not in f.summary, f"{name} leaked into a row that caps the list"
+    assert f"… {len(missing)} more peripheral(s) not named, " \
+           f"{len(missing) * 3} site(s) among them)" in f.summary
+    # the subject's number and the bracketed list must never both be read as the whole truth
+    assert f.subject.startswith(f"{len(pick)} peripheral(s)"), f.subject
+    assert any(f"names {len(named)} of the {len(pick)} block(s)" in u for u in f.unknowns), \
+        f.unknowns
+    assert any("one site drawn from each of" in u for u in f.unknowns), f.unknowns
+    assert not validate([f])
+
+
+def test_a_materialised_row_under_the_name_cap_names_every_block_it_counts(soc, image):
+    """The disclosure belongs to the cut, not to the row: two blocks get two names."""
+    imm = {("USART1", "CR1", None): [Evidence(kind="instruction", note="a", file_offset=0,
+                                              vaddr=TEXT_BASE, hex="0068")],
+           ("GPIOA", None, None): [Evidence(kind="instruction", note="b", file_offset=4,
+                                            vaddr=TEXT_BASE + 4, hex="0123")]}
+    f, = decode._fold({}, imm, soc, image,
+                      {"engine": "capstone/test", "instructions": 20, "coverage": 0.4})
+    assert "more peripheral(s) not named" not in f.summary
+    assert not any("block(s) it counts" in u for u in f.unknowns), f.unknowns
+
+
 # ------------------------------------------------------------------- coverage of the map
 
 QSPI_R = 0xA000_1000        # RM0433: STM32F765 quad-SPI control block, absent on F4

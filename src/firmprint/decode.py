@@ -69,6 +69,14 @@ _EVIDENCE_CAP = 24
 #: rows under a sentence about twenty-four addresses is entitled to be told which is which.
 _COVERAGE_EVIDENCE_CAP = 8
 
+#: how many block names a `peripheral.materialised` row is allowed to spell out, and how many
+#: of its peripherals get an evidence record.  The subject and the metrics always hold every
+#: block; the OpenMV2 ELF reaches 46 of them, and a row that counts 46 while listing eight
+#: names reads as the tool contradicting itself unless it also says who is missing and how
+#: much traffic they carry.
+_IMMEDIATE_NAME_CAP = 8
+_IMMEDIATE_EVIDENCE_KEYS = 4
+
 #: private key under which `_record` accumulates the true counts, removed from `stats`
 #: before the report is built so no internal field reaches a reader or the JSON schema.
 _TALLY = "_access_tally"
@@ -533,20 +541,39 @@ def _fold(accesses: dict, immediates: dict, soc: Soc, image: Image, stats: dict)
     imm_capped = any(tally.get(k, 0) > len(v) for k, v in immediates.items())
     if imm_total:
         names = sorted({k[0] for k in immediates})
-        sample = [e for v in list(immediates.values())[:4] for e in v[:1]]
+        shown_names = names[:_IMMEDIATE_NAME_CAP]
+        named = set(shown_names)
+        rest_sites = sum(tally.get(k, len(v)) for k, v in immediates.items() if k[0] not in named)
+        buckets = list(immediates.values())[:_IMMEDIATE_EVIDENCE_KEYS]
+        sample = [e for v in buckets for e in v[:1]]
+        unknowns = ["MOVW/MOVT only gives the low 16 bits until the MOVT half is seen; "
+                    "partial pairs are reported as block membership, not register access"]
+        if len(names) > len(shown_names):
+            unknowns.append(f"the row names {len(shown_names)} of the {len(names)} block(s) it "
+                            "counts; `metrics.peripherals` is the whole list")
+        if len(sample) < imm_total:
+            unknowns.append(f"the {len(sample)} evidence record(s) are one site drawn from each "
+                            f"of {len(buckets)} of the {len(names)} peripheral(s) this row "
+                            "counts; the other sites are tallied, not shown")
+        if imm_capped:
+            unknowns.append(f"the site count is the full total; evidence records stop after "
+                            f"{_EVIDENCE_CAP} sites per key")
         f = Finding(
             kind="peripheral.materialised",
             subject=f"{len(names)} peripheral(s) built by immediate pairs",
             confidence=0.7,
             summary=(f"{imm_total} decoded MOVW/MOVT/LDR-literal sites materialise an address "
-                     f"inside a known block ({', '.join(names[:8])})"),
+                     f"inside a known block ({', '.join(shown_names)}"
+                     # the eight names in brackets are not the subject's number, so the cut is
+                     # stated inside the list rather than left for a reader to count out
+                     + (f"; … {len(names) - len(shown_names)} more peripheral(s) not named, "
+                        f"{rest_sites} site(s) among them"
+                        if len(names) > len(shown_names) else "")
+                     + ")"),
             engine=stats["engine"],
             rule="peripheral.materialised.immediate",
             evidence=sample,
-            unknowns=["MOVW/MOVT only gives the low 16 bits until the MOVT half is seen; "
-                      "partial pairs are reported as block membership, not register access"]
-                     + ([f"the site count is the full total; evidence records stop after "
-                         f"{_EVIDENCE_CAP} sites per key"] if imm_capped else []),
+            unknowns=unknowns,
             metrics={"sites": imm_total, "peripherals": names,
                      "decode_coverage": stats["coverage"], "instructions": stats["instructions"]},
         )

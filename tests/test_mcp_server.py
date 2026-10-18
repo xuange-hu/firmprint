@@ -2,8 +2,9 @@
 
 An agent will trust this server's output, so the tests pin the parts that make a
 claim checkable: the report schema id travels in `initialize`, errors are JSON-RPC
-errors rather than text that looks like a result, and a scan reply still carries
-`contract.violations` so the caller can refuse an untrustworthy report.
+errors rather than text that looks like a result, a scan reply still carries
+`contract.violations` so the caller can refuse an untrustworthy report, and a reply
+that shows a subset of the findings names the total it was taken from.
 """
 from __future__ import annotations
 
@@ -179,6 +180,25 @@ def test_max_findings_trims_the_payload_and_says_so(dump):
                                              "max_findings": 2}))
     assert len(report["findings"]) == 2
     assert report["meta"]["findings_truncated_to"] == 2
+    # without the total, a caller that counts rows cannot tell 2-of-2 from 2-of-118
+    assert report["meta"]["findings_total"] > 2, "the fixture no longer overflows this cap"
+
+
+def test_an_untrimmed_reply_still_states_its_own_size(dump):
+    """The total travels with every JSON reply, and a cut that never happened is not labelled.
+
+    Answering `max_findings: 500` with `findings_truncated_to: 500` would teach readers that
+    the key means nothing; leaving the plain reply without a total leaves the agent that
+    trusts it with nothing to compare `len(findings)` against.
+    """
+    plain = payload(tool("firmprint_scan", {"path": str(dump), "no_code": True}))
+    assert plain["meta"]["findings_total"] == len(plain["findings"])
+    assert "findings_truncated_to" not in plain["meta"]
+    roomy = payload(tool("firmprint_scan", {"path": str(dump), "no_code": True,
+                                            "max_findings": len(plain["findings"]) + 10}))
+    assert len(roomy["findings"]) == len(plain["findings"])
+    assert roomy["meta"]["findings_total"] == len(roomy["findings"])
+    assert "findings_truncated_to" not in roomy["meta"]
 
 
 def test_markdown_format_is_a_string_not_an_object(dump):
@@ -235,6 +255,7 @@ def test_max_findings_zero_is_a_request_not_an_absence(tmp_path):
                                              "max_findings": 0}))
     assert report["findings"] == []
     assert report["meta"]["findings_truncated_to"] == 0
+    assert report["meta"]["findings_total"] > 0, "an empty list needs the total it replaced"
 
 
 @pytest.mark.skipif(not __import__("firmprint.decode", fromlist=["available"]).available(),

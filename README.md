@@ -122,7 +122,7 @@ python tools/make_synthetic.py blob.bin   # a shaped Cortex-M image: no download
 firmprint scan blob.bin --strict          # the dependency-free path still answers
 python tools/get_sample.py --all          # OpenMV v5.0.1 images, one 91 MB archive, every
                                           # file pinned by sha256 and refused on mismatch
-python -m pytest -q                       # 315 tests, no network
+python -m pytest -q                       # 318 tests, no network
 ```
 
 ## 30-second tour
@@ -312,6 +312,10 @@ settings, Continue, Zed, or the official `mcp` Python SDK):
 | `firmprint_socdb_list` | installed maps and their header provenance |
 | `firmprint_socdb_show` | resolve one address → block + register, to re-check a report line |
 
+Pass `max_findings` when the reply has to fit a context window: a trimmed reply carries
+`meta.findings_total`, the number of rows the scan really produced, so the model can tell you
+that it saw a subset instead of concluding the image was quiet.
+
 Prompt idea that works well: *"scan this image, then for every `soc.candidate` with
 `exclusive_constants == 0`, tell me what evidence would separate the parts."* The report
 already contains that answer in `unknowns`, which is exactly the point — the model gets a
@@ -379,7 +383,7 @@ for the two worked analyses.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q          # 315 tests; the sample-dependent ones skip cleanly
+python -m pytest -q          # 318 tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
 python tools/check_doc_quotes.py   # every report line *and every number in a sentence*

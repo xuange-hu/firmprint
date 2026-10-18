@@ -54,7 +54,9 @@ TOOLS: list[dict] = [
                 "format": {"type": "string", "enum": ["json", "markdown"],
                            "description": "json (default) or a human summary"},
                 "max_findings": {"type": "integer",
-                                 "description": "trim the finding list (json only)"},
+                                 "description": "trim the finding list (json only); a trimmed "
+                                                "reply carries meta.findings_total, the number "
+                                                "of rows the scan really produced"},
             },
             "required": ["path"],
         },
@@ -167,10 +169,20 @@ def _scan(args: dict) -> Any:
                      full=bool(args.get("full")), skip_code=bool(args.get("no_code")))
     if args.get("format") == "markdown":
         return to_markdown(report)
+    # Every JSON reply says how many rows the scan produced, trimmed or not: a caller that
+    # only counts `findings` cannot otherwise tell 2 rows out of 2 from 2 rows out of 118, and
+    # an agent that spends its context on the first two has no way to learn 116 more exist.
+    total = len(report["findings"])
+    meta = {**report["meta"], "findings_total": total}
     if args.get("max_findings") is not None:
         n = int(args["max_findings"])
-        report = {**report, "findings": report["findings"][:n],
-                  "meta": {**report["meta"], "findings_truncated_to": n}}
+        if n < total:
+            # a request nothing needed to satisfy is not a truncation, and labelling it one
+            # would teach readers that the key says nothing
+            meta["findings_truncated_to"] = n
+        report = {**report, "findings": report["findings"][:n], "meta": meta}
+    else:
+        report = {**report, "meta": meta}
     return report
 
 
