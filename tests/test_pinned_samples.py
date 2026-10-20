@@ -10,6 +10,14 @@ costs an afternoon every time it recurs.
 So the fetcher is pinned here the way the heuristics are: it must refuse a build it was not
 given digests for, it must not substitute one board's file for another's, and it must only
 treat files already on disk as "already fetched" when they verify.
+
+The same file decides what this repository is entitled to *say* about other people's bytes.
+It used to call them "MIT-licensed" -- `tools/get_sample.py` said so, and README,
+CONTRIBUTING, the CI step name and both generated answer keys repeated it.  Upstream publishes
+no root `LICENSE` file, states GPL components, and calls some components proprietary and
+non-commercial-only, so the repository was asserting a licence for bytes it had never checked.
+`NOTICE.md` is where the honest version lives, and the last tests here keep the prose and that
+file agreeing with each other and with the boards actually being fetched.
 """
 from __future__ import annotations
 
@@ -18,6 +26,7 @@ import hashlib
 import importlib.util
 import io
 import pathlib
+import re
 import sys
 import zipfile
 
@@ -235,3 +244,134 @@ def test_the_archive_digest_is_enforced_before_unpacking(fetch, monkeypatch):
     assert rc == 1
     assert "is not the pinned build" in err and "A tagged release must not move" in err
     assert not fetch.dests["OPENMV2"].exists()
+
+
+# ------------------------------------------------------------------------ licence prose
+
+#: The nouns nobody here has a licence to claim.  `code` and `source` are deliberately absent:
+#: upstream's own sentence ("most of the code in the repository is licensed under the MIT
+#: license") is quoted in `NOTICE.md`, and it is about *source*, which is not what we fetch.
+_FIRMWARE = r"openmv|firmware|images?|samples?|boards?|artifacts?|binaries?"
+
+#: "MIT-licensed OpenMV firmware", "MIT licensed samples" -- the adjectival form, which is how
+#: this repository actually wrote the claim.
+ADJECTIVAL = re.compile(rf"MIT[- ]licensed(?:\W+\w+){{0,3}}?\W*\b({_FIRMWARE})\b", re.I)
+
+#: "... the firmware images are MIT": the predicate form an honest-sounding rewrite reaches for.
+#: "images are *not* MIT" does not match, because `is|are` has to sit next to the licence.
+PREDICATE = re.compile(rf"\b({_FIRMWARE})\b(?:\W+\w+){{0,3}}\b(?:is|are)\b\W*MIT\b", re.I)
+
+#: "... firmware images licensed under the MIT license".
+UNDER = re.compile(rf"\b({_FIRMWARE})\b(?:\W+\w+){{0,4}}licensed\W+(?:under\s+)?(?:the\s+)?MIT\b",
+                   re.I)
+
+
+def _claim_files():
+    """Every file a reader reaches that states (or implies) what the samples are licensed under.
+
+    Tests are deliberately not in this list: this very file quotes the false claim it exists to
+    prevent, and a lint that cannot distinguish a claim from a quotation of one is a lint people
+    turn off.  The prose files are written to be checkable -- `NOTICE.md` refuses in a shape
+    these patterns do not match, so a refusal is not an exemption.
+    """
+    files = [ROOT / "README.md", ROOT / "CONTRIBUTING.md", ROOT / "SECURITY.md",
+             ROOT / "NOTICE.md", *sorted((ROOT / "docs").glob("*.md")),
+             *sorted((ROOT / "verification").glob("*.md")),
+             *sorted((ROOT / "tools").glob("*.py")),
+             *sorted((ROOT / "src" / "firmprint").glob("*.py")),
+             *sorted((ROOT / ".github").rglob("*.yml")),
+             *sorted((ROOT / ".github").rglob("*.md"))]
+    return [f for f in files if f.exists()]
+
+
+def mit_claims(text: str) -> list[str]:
+    """Lines that assert a licence for someone else's build artifacts."""
+    out = []
+    for line in text.splitlines():
+        for pattern in (ADJECTIVAL, PREDICATE, UNDER):
+            if pattern.search(line):
+                out.append(line.strip())
+                break
+    return out
+
+
+def test_no_prose_claims_a_licence_for_firmware_it_did_not_write():
+    """The false statement this repository shipped was "MIT-licensed OpenMV firmware".
+
+    Not a hypothesis: `git show HEAD:README.md` before the correction carried it in the
+    verification section, `CONTRIBUTING.md` in the sample-fetching instructions,
+    `tools/get_sample.py` in its module docstring, `tools/make_verification.py` twice -- which
+    is how it reached both generated answer keys -- and the CI step name.  Upstream's README
+    says the opposite in the same breath as the word MIT: *most* of the code, with GPL image
+    libraries and proprietary non-commercial-only components, and there is no root `LICENSE`
+    file to point at.  A release artifact cannot be licensed by a badge on its repository.
+
+    The rule is aimed at the claim, not the word: `NOTICE.md` and the README's License section
+    both say "MIT" about the firmware in order to refuse to license it, and neither matches.
+    It is a shape check, so it is not omniscient: a sentence that puts "MIT" and "firmware" in
+    adjacent clauses without predication (the old `MIT. Third-party firmware images used for
+    verification are fetched...` paragraph) is outside its reach, which is why the README now
+    says what it means in the words these patterns can see.
+    """
+    offenders = {f.relative_to(ROOT).as_posix(): mit_claims(f.read_text(encoding="utf8"))
+                 for f in _claim_files()}
+    bad = {name: lines for name, lines in offenders.items() if lines}
+    assert not bad, "prose licenses bytes it did not write: " + "; ".join(
+        f"{name}: {line}" for name, lines in sorted(bad.items()) for line in lines)
+
+
+def test_the_denial_is_still_written_where_the_claim_used_to_be():
+    """Removing a false claim silently is one edit; removing the *reason* is invisible.
+
+    `NOTICE.md` only earns its place if it keeps both halves: upstream's words quoted rather
+    than paraphrased, and what we checked and could not establish.  Either half going missing
+    turns the file into a disclaimer, which is the shape of sentence this repository has to be
+    most careful about trusting.
+    """
+    notice = ROOT / "NOTICE.md"
+    assert notice.exists(), "NOTICE.md is gone: the licence story has no home"
+    text = notice.read_text(encoding="utf8")
+    # upstream, quoted: the GPL exception and the proprietary exception, in its words
+    quoted = [line[2:].strip() for line in text.splitlines() if line.startswith("> ")]
+    joined = " ".join(quoted)
+    assert "MIT license" in joined, "the quote no longer contains upstream's MIT sentence"
+    assert "licensed under the GPL" in joined and "non-commercial use only" in joined, \
+        "the quote no longer contains the two exceptions that made the plain MIT claim wrong"
+    assert re.search(r"[0-9a-f]{40}", text), \
+        "the quote is unattributable: no commit it was read at"
+    # and our own refusal, with the check behind it
+    assert re.search(r"does \*\*not\*\* describe these firmware images as .MIT.", text), \
+        "NOTICE.md no longer says outright that it will not call these images MIT"
+    assert "no `LICENSE` file" in text or "not Found" in text, \
+        "NOTICE.md no longer records what it looked for and did not find"
+
+
+def test_notice_describes_the_boards_that_are_actually_being_fetched():
+    """The gate for adding a board, so it cannot be skipped by forgetting it exists.
+
+    `NOTICE.md` ends with a rule for the next sample batch -- record the directory, the real
+    part, the digests, and what you checked about its licence.  Prose cannot enforce a rule, so
+    this does: every board in `BOARDS` has to be named in the notice, and the release and
+    archive digest the fetcher pins have to be the ones the notice publishes.  Re-pin
+    `RELEASE` or `ASSET_SHA256` alone, or add a `PORTENTA_H7` board alone, and this fails
+    before an answer key describes bytes nobody accounted for.
+    """
+    text = (ROOT / "NOTICE.md").read_text(encoding="utf8")
+    for board, (_prefix, _dest, pins) in sorted(gs.BOARDS.items()):
+        assert board in text, f"{board} is fetched but not described in NOTICE.md"
+        assert pins, f"{board} has no pins: NOTICE.md cannot be accounting for its files"
+    assert gs.RELEASE in text and gs.ASSET_SHA256 in text, \
+        "NOTICE.md and the fetcher stopped naming the same build"
+    assert f"{gs.RELEASE}.zip" in text or "firmware_" in text, \
+        "NOTICE.md does not name the asset the digest belongs to"
+    assert "## Adding a board" in text, \
+        "the notice stopped telling the next contributor what to record about a new sample"
+    # the README and the contributor guide have to lead a reader here
+    for f in (ROOT / "README.md", ROOT / "CONTRIBUTING.md"):
+        assert "NOTICE.md" in f.read_text(encoding="utf8"), f"{f.name} hides the notice"
+    # a wheel is the only artifact that ships without a checkout, so the notice goes in it
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf8")
+    license_files = re.search(r"^license-files\s*=\s*\[[^\]]*\]", pyproject, re.M)
+    assert license_files and "NOTICE.md" in license_files.group(0), \
+        "the wheel ships LICENSE and nothing else: an installer reads 'MIT' and never learns " \
+        "that the verification images are somebody else's build artifacts"

@@ -117,6 +117,10 @@ jobs:
           "$FP" --version
           test -n "$("$FP" socdb list)"                     # data/*.json really shipped
           test "$("$FP" socdb list | grep -c '^stm32')" -eq 3
+          # a wheel is the one artifact someone can end up with and never read a checkout:
+          # if it ships LICENSE alone, its reader gets "MIT" and never learns that the
+          # firmware images the documents describe are somebody else's build artifacts
+          "$PY" -c "import importlib.metadata as m;d=m.distribution('firmprint');l=d.metadata.get_all('License-File') or [];assert set(l)>={'LICENSE','NOTICE.md'},l;assert any(str(f).endswith('licenses/NOTICE.md') for f in (m.files('firmprint') or [])),'METADATA names the notice, the wheel omits it'"
           "$FP" scan blob.bin --no-code --strict
           "$FP" scan blob.bin --no-code --json out.json
           "$PY" -c "import json;c=json.load(open('out.json',encoding='utf-8'))['contract'];assert not c['violations'],c"
@@ -142,7 +146,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[capstone]"
 
-      - name: Fetch pinned MIT-licensed samples
+      - name: Fetch pinned third-party samples (licence provenance: NOTICE.md)
         run: python tools/get_sample.py --all
 
       - name: Score against the image's own symbols (both boards)

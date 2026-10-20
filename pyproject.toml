@@ -12,7 +12,11 @@ description = "Evidence-backed firmware identification for Cortex-M images: ever
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-license-files = ["LICENSE"]
+# LICENSE is ours.  NOTICE.md is the licence story of the *verification samples*, and a wheel
+# is the one artifact a reader gets without a checkout -- shipping only LICENSE would hand over
+# the MIT part and keep the part that says those firmware images are somebody else's build
+# artifacts, with no root LICENSE upstream to point at, in a file nobody installed.
+license-files = ["LICENSE", "NOTICE.md"]
 keywords = ["firmware", "reverse-engineering", "cortex-m", "stm32", "embedded",
             "dfir", "vector-table", "mcp"]
 classifiers = [

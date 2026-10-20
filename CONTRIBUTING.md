@@ -13,9 +13,10 @@ python -m pytest -q                                  # sample-dependent tests sk
 python -m ruff check src tools tests
 ```
 
-Tests run without the firmware samples.  To get them (MIT-licensed OpenMV builds, from an
+Tests run without the firmware samples.  To get them (OpenMV firmware builds, from an
 immutable release tag, every file pinned by sha256 — one ~91 MB archive covering both
-boards):
+boards; [`NOTICE.md`](NOTICE.md) says what upstream states about licensing and what we
+could not establish):
 
 ```bash
 python tools/get_sample.py --all
@@ -26,6 +27,11 @@ python tools/get_sample.py --all --check   # are the files on disk the pinned bu
 Binary blobs in this repository would also make the verification claims unverifiable,
 because a reader cannot tell whether the file they checked against is the file the numbers
 came from.
+
+Adding a board means editing `NOTICE.md` in the same commit as `BOARDS`: name the directory in
+the archive, the real part it carries, the files with their digests, and **what you actually
+checked about its licence**.  A test enforces that every board in `BOARDS` appears in the
+notice, because "it came from the same release" is not evidence of a licence.
 
 That last sentence is why the fetcher pins digests instead of printing a note.  It used to
 download OpenMV's rolling `development` asset and compare one archive digest; when a digest

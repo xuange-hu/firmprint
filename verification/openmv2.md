@@ -2,7 +2,7 @@
 
 A reverse-engineering tool that outputs confident prose is easy to dismiss, so this
 repository ships an answer key instead of a promise.  Every number below was produced
-by `python tools/make_verification.py openmv2` against MIT-licensed OpenMV firmware —
+by `python tools/make_verification.py openmv2` against real OpenMV firmware —
 no figure is typed in by hand.
 
 - source: OpenMV release `v5.0.1`, asset `firmware_v5.0.1.zip` (sha256 `1338b9607b57d88cf1de5aee115ea0e18cb17d06ff4d8dc55d6c022dba66dbc8`), fetched by `python tools/get_sample.py --all`
@@ -109,7 +109,7 @@ one of them.
 
 ```bash
 pip install -e .[capstone]
-python tools/get_sample.py --board OPENMV2   # MIT-licensed OpenMV firmware
+python tools/get_sample.py --board OPENMV2   # real OpenMV firmware, see NOTICE.md
 python tools/make_verification.py openmv2      # rewrites this file
 ```
 

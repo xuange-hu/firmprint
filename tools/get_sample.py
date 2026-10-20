@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Fetch the OpenMV firmware samples used by the verification documents, by digest.
 
-Why a fetcher instead of a committed binary: the images are build artifacts of
-MIT-licensed OpenMV firmware (an STM32F427 camera and an STM32F765 one), and the
-repository should not ship third-party binaries it cannot re-license.
+Why a fetcher instead of a committed binary: the images are build artifacts of OpenMV
+firmware (an STM32F427 camera and an STM32F765 one), and the repository should not ship
+third-party binaries it cannot re-license.  `NOTICE.md` records what upstream actually says
+about its licensing and what we checked and could not establish; it deliberately does not
+call these images "MIT", and nothing here should repeat that claim.
 
 Why a *tagged release* and a hard digest check, rather than the `development` asset this
 script used to read: `development` is a rolling prerelease, republished on every upstream
