@@ -146,7 +146,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[capstone]"
 
-      - name: Fetch pinned third-party samples (licence provenance: NOTICE.md)
+      - name: 'Fetch pinned third-party samples (licence provenance: NOTICE.md)'
         run: python tools/get_sample.py --all
 
       - name: Score against the image's own symbols (both boards)

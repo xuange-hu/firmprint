@@ -104,6 +104,20 @@ keep every line the CLI printed in order.  A dropped line is stale even when eve
 line is real — that is how the OpenMV3 case study ended up quoting a container note whose
 "origins that also produced tables" list disagreed with the tool by a count and an order.
 
+## Before pushing: the workflow file has to parse
+
+A YAML error in `.github/workflows/ci.yml` does not fail a step — GitHub starts **no jobs at
+all**, marks the run `completed / failure` in the same second it began, and the only signal
+that something was supposed to happen is the absence of everything.  `tests/test_ci_workflow.py`
+catches the shape that did this on 2026-10-20 (a step name containing `(licence provenance:
+NOTICE.md)`: in a plain YAML scalar, `: ` means "new mapping", so the file was one nested key
+the parser refused to accept) without adding a dependency.
+
+Read it as the limitation it has, not as insurance: the test runs in the suite, and the suite
+runs in the workflow, so a push that breaks the file breaks the thing that would have caught
+it.  Run `python -m pytest -q` *before* pushing a workflow change — and after any change that
+touches `name:`, `run:` on one line, or a step description with parentheses in it.
+
 ## Writing tests the way this suite is written
 
 Tests here are falsification devices, not coverage devices.  Most of the interesting ones

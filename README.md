@@ -122,7 +122,7 @@ python tools/make_synthetic.py blob.bin   # a shaped Cortex-M image: no download
 firmprint scan blob.bin --strict          # the dependency-free path still answers
 python tools/get_sample.py --all          # OpenMV v5.0.1 images, one 91 MB archive, every
                                           # file pinned by sha256 and refused on mismatch
-python -m pytest -q                       # 322 tests, no network
+python -m pytest -q                       # 325 tests, no network
 ```
 
 ## 30-second tour
@@ -385,7 +385,7 @@ for the two worked analyses.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q          # 322 tests; the sample-dependent ones skip cleanly
+python -m pytest -q          # 325 tests; the sample-dependent ones skip cleanly
 python -m ruff check src tools tests
 firmprint mcp --self-test
 python tools/check_doc_quotes.py   # every report line *and every number in a sentence*
